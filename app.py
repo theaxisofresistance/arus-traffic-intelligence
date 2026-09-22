@@ -14,9 +14,10 @@ from service import TrafficService
 
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
+    default_data_dir = '/tmp/arus_flask' if os.environ.get('VERCEL') else app.instance_path
     app.config.update(MAX_CONTENT_LENGTH=80 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True,
                       SESSION_COOKIE_SAMESITE='Strict', JSON_SORT_KEYS=False,
-                      DATA_DIR=os.environ.get('ARUS_DATA_DIR', app.instance_path))
+                      DATA_DIR=os.environ.get('ARUS_DATA_DIR', default_data_dir))
     if test_config:
         app.config.update(test_config)
     folder = Path(app.config['DATA_DIR'])
