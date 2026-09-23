@@ -4,3 +4,4 @@ __pycache__/
 models/*.pt
 *.pyc
 instance/session.key
+instance/iot_readings.json

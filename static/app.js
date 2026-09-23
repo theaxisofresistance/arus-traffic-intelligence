@@ -1,11 +1,12 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {data:null, sensor:0, horizon:12, page:'ringkasan', listPage:0, request:0, pending:0, map:null, mapLayer:null, mapMarkers:new Map(), mapRevision:null};
+const state = {data:null, sensor:0, horizon:12, page:'ringkasan', listPage:0, request:0, pending:0, map:null, mapLayer:null, mapMarkers:new Map(), mapRevision:null, iotTimer:null};
 const titles = {
   ringkasan:['Lalu lintas, lebih terbaca.','Pahami pergerakan hari ini. Lihat kemungkinan arus berikutnya.','Ringkasan'],
   prediksi:['Selangkah di depan arus.','Eksplorasi prediksi, bandingkan hasil, dan temukan polanya.','Prediksi arus'],
   peta:['Lihat arus dari sudut berbeda.','Jelajahi nilai sensor pada posisi ilustratif yang dibuat khusus untuk visualisasi.','Peta sensor'],
   sensor:['Setiap sensor, satu cerita.','Telusuri pengamatan terakhir dari setiap titik dalam dataset.','Daftar sensor'],
+  iot:['Sensor terhubung, data mengalir.','Terima dan pantau data POST dari perangkat IoT secara langsung.','IoT Live'],
   data:['Data yang tepat. Prediksi yang berarti.','Hubungkan dataset dan checkpoint hasil training Anda.','Model & data']
 };
 const number = (v,d=1) => v === null || v === undefined || !Number.isFinite(v) ? '—' : new Intl.NumberFormat('id-ID',{maximumFractionDigits:d,minimumFractionDigits:d}).format(v);
@@ -22,6 +23,8 @@ function setPage(page){
   document.querySelectorAll('.nav-item').forEach(el=>{el.classList.toggle('active',el.dataset.page===page);el.setAttribute('aria-current',el.dataset.page===page?'page':'false');});
   text('page-title',titles[page][0]);text('page-subtitle',titles[page][1]);text('breadcrumb-title',titles[page][2]);
   history.replaceState(null,'',`#${page}`);closeMenu();
+  clearInterval(state.iotTimer);state.iotTimer=null;
+  if(page==='iot'){loadIot();state.iotTimer=setInterval(()=>{if(state.page==='iot')loadIot(true);},5000);}
   if(state.data){renderCharts();if(page==='sensor')renderSensors();if(page==='peta')setTimeout(renderMap,0);}
 }
 async function api(url, options={}){
@@ -117,6 +120,18 @@ function renderSensors(){
   text('pagination-label',rows.length?`${start+1}–${Math.min(start+count,rows.length)} dari ${rows.length} sensor`:'0 sensor');
   $('previous-page').disabled=state.listPage===0;$('next-page').disabled=state.listPage>=lastPage;
 }
+function iotDate(value){
+  if(!value)return '—';
+  const date=new Date(value);return Number.isNaN(date.getTime())?value:new Intl.DateTimeFormat('id-ID',{dateStyle:'short',timeStyle:'medium'}).format(date);
+}
+async function loadIot(silent=false){
+  try{
+    const data=await api('/api/iot/readings?limit=50');
+    text('iot-total',data.total);text('iot-devices',data.latest.length);
+    text('iot-last',data.readings.length?iotDate(data.readings[0].received_at):'Belum ada data');
+    $('iot-table').innerHTML=data.readings.length?data.readings.map(row=>`<tr><td>${iotDate(row.timestamp)}</td><td><span class="sensor-cell"><span class="sensor-symbol">${icon('sensor')}</span>${row.device_id}</span></td><td>${number(row.flow,2)}</td><td>${number(row.occupancy,2)}</td><td>${number(row.speed,2)}</td><td>${row.latitude===undefined?'—':`${number(row.latitude,6)}, ${number(row.longitude,6)}`}</td><td>${iotDate(row.received_at)}</td></tr>`).join(''):'<tr><td colspan="7" class="empty-row">Belum ada data sensor.</td></tr>';
+  }catch(error){if(!silent)fail(error);}
+}
 function flowThresholds(rows){
   const values=rows.map(row=>row.flow).filter(Number.isFinite).sort((a,b)=>a-b);
   if(!values.length)return [0,0];
@@ -183,6 +198,16 @@ $('retry-button').addEventListener('click',()=>load({reset:true}));
 $('sensor-search').addEventListener('input',()=>{state.listPage=0;renderSensors();});
 $('previous-page').addEventListener('click',()=>{state.listPage--;renderSensors();});
 $('next-page').addEventListener('click',()=>{state.listPage++;renderSensors();});
+$('iot-refresh').addEventListener('click',()=>loadIot());
+$('iot-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(state.pending)return;
+  const form=event.currentTarget,button=form.querySelector('button[type=submit]'),values=new FormData(form);
+  const payload={device_id:values.get('device_id'),flow:Number(values.get('flow')),occupancy:Number(values.get('occupancy')),speed:Number(values.get('speed'))};
+  state.pending++;button.disabled=true;
+  try{const result=await api('/api/iot/readings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});toast(result.message);await loadIot();}
+  catch(error){fail(error);}
+  finally{state.pending--;button.disabled=false;}
+});
 $('menu-button').addEventListener('click',()=>{const open=!$('sidebar').classList.contains('open');$('sidebar').classList.toggle('open',open);$('scrim').hidden=!open;$('menu-button').setAttribute('aria-expanded',String(open));});
 $('scrim').addEventListener('click',closeMenu);
 document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMenu();});

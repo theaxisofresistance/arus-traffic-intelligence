@@ -1,15 +1,23 @@
 """ARUS: Flask dashboard for the revised traffic forecasting notebook."""
 import csv
 import io
+import json
+import math
 import os
+import re
 import secrets
 import tempfile
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_file, session
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 from service import TrafficService
+
+
+IOT_MAX_READINGS = 500
+IOT_DEVICE_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')
 
 
 def create_app(test_config=None):
@@ -33,10 +41,27 @@ def create_app(test_config=None):
     service = TrafficService(folder)
     lock = threading.RLock()
     app.extensions['traffic'] = service
+    iot_path = folder / 'iot_readings.json'
+
+    def load_iot_readings():
+        try:
+            value = json.loads(iot_path.read_text(encoding='utf-8'))
+            return value[-IOT_MAX_READINGS:] if isinstance(value, list) else []
+        except (OSError, ValueError):
+            return []
+
+    iot_readings = load_iot_readings()
+
+    def persist_iot_readings():
+        temporary = folder / 'iot_readings.tmp'
+        temporary.write_text(json.dumps(iot_readings, ensure_ascii=False), encoding='utf-8')
+        os.replace(temporary, iot_path)
 
     @app.before_request
     def protect_changes():
         if request.method in ('POST', 'DELETE', 'PUT', 'PATCH'):
+            if request.path == '/api/iot/readings':
+                return None
             expected = session.get('csrf')
             supplied = request.headers.get('X-CSRF-Token', '')
             if not expected or not secrets.compare_digest(expected, supplied):
@@ -90,6 +115,82 @@ def create_app(test_config=None):
     @app.get('/api/health')
     def health():
         return jsonify(status='ok', application='ARUS')
+
+    @app.route('/api/iot/readings', methods=['GET', 'POST'])
+    def iot():
+        if request.method == 'POST':
+            if request.content_length and request.content_length > 16 * 1024:
+                return jsonify(error='Payload IoT maksimum 16 KB.'), 413
+            if not request.is_json:
+                raise ValueError('Gunakan Content-Type application/json.')
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                raise ValueError('Body harus berupa objek JSON.')
+            device_id = str(payload.get('device_id', '')).strip()
+            if not IOT_DEVICE_PATTERN.fullmatch(device_id):
+                raise ValueError('device_id wajib 1–64 karakter: huruf, angka, titik, garis, titik dua, atau underscore.')
+            values = {}
+            for field in ('flow', 'occupancy', 'speed'):
+                value = payload.get(field)
+                if isinstance(value, bool):
+                    raise ValueError(f'{field} harus berupa angka.')
+                try:
+                    value = float(value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f'{field} harus berupa angka.') from exc
+                if not math.isfinite(value):
+                    raise ValueError(f'{field} harus berupa angka finite.')
+                if value < 0:
+                    raise ValueError(f'{field} tidak boleh negatif.')
+                values[field] = value
+            latitude, longitude = payload.get('latitude'), payload.get('longitude')
+            if (latitude is None) != (longitude is None):
+                raise ValueError('latitude dan longitude harus dikirim bersamaan.')
+            if latitude is not None:
+                try:
+                    latitude, longitude = float(latitude), float(longitude)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError('latitude dan longitude harus berupa angka.') from exc
+                if not math.isfinite(latitude) or not math.isfinite(longitude):
+                    raise ValueError('Koordinat GPS harus berupa angka finite.')
+                if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                    raise ValueError('Koordinat GPS berada di luar rentang yang valid.')
+            timestamp = payload.get('timestamp')
+            if timestamp is None:
+                observed = datetime.now(timezone.utc)
+            else:
+                try:
+                    observed = datetime.fromisoformat(str(timestamp).replace('Z', '+00:00'))
+                    if observed.tzinfo is None:
+                        observed = observed.replace(tzinfo=timezone.utc)
+                    observed = observed.astimezone(timezone.utc)
+                except ValueError as exc:
+                    raise ValueError('timestamp harus berformat ISO 8601.') from exc
+            reading = {
+                'id': secrets.token_hex(8), 'device_id': device_id,
+                'timestamp': observed.isoformat().replace('+00:00', 'Z'), **values,
+                'received_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            }
+            if latitude is not None:
+                reading.update(latitude=latitude, longitude=longitude)
+            with lock:
+                iot_readings.append(reading)
+                del iot_readings[:-IOT_MAX_READINGS]
+                persist_iot_readings()
+            return jsonify(message='Data sensor berhasil diterima.', reading=reading), 201
+
+        try:
+            limit = int(request.args.get('limit', 50))
+        except (TypeError, ValueError) as exc:
+            raise ValueError('limit harus berupa bilangan bulat.') from exc
+        if not 1 <= limit <= 200:
+            raise ValueError('limit harus antara 1 dan 200.')
+        with lock:
+            recent = list(reversed(iot_readings[-limit:]))
+            latest = {}
+            for reading in reversed(iot_readings):
+                latest.setdefault(reading['device_id'], reading)
+        return jsonify(readings=recent, latest=list(latest.values()), total=len(iot_readings))
 
     @app.get('/api/forecast.csv')
     def export_csv():
@@ -178,4 +279,5 @@ app = create_app()
 
 
 if __name__ == '__main__':
-    create_app().run(host='127.0.0.1', port=int(os.environ.get('PORT', 5001)), debug=False)
+    create_app().run(host=os.environ.get('HOST', '127.0.0.1'),
+                     port=int(os.environ.get('PORT', 5001)), debug=False)

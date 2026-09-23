@@ -79,6 +79,27 @@ def test_csrf(app):
     assert client.post('/api/reset', headers=headers).status_code == 200
 
 
+def test_iot_ingest_validation_and_persistence(app):
+    client = app.test_client()
+    payload = {'device_id': 'sensor-001', 'flow': 120, 'occupancy': .42, 'speed': 48.5,
+               'latitude': -6.2088, 'longitude': 106.8456,
+               'timestamp': '2026-09-23T10:30:00Z'}
+    response = client.post('/api/iot/readings', json=payload)
+    assert response.status_code == 201
+    assert response.json['reading']['device_id'] == 'sensor-001'
+    data = client.get('/api/iot/readings?limit=10').json
+    assert data['total'] == 1 and len(data['latest']) == 1
+    assert data['readings'][0]['flow'] == 120
+    assert data['readings'][0]['latitude'] == -6.2088
+    assert client.post('/api/iot/readings', data='not json').status_code == 400
+    assert client.post('/api/iot/readings', json={**payload, 'speed': -1}).status_code == 400
+    assert client.post('/api/iot/readings', json={**payload, 'latitude': 91}).status_code == 400
+    without_longitude = {key: value for key, value in payload.items() if key != 'longitude'}
+    assert client.post('/api/iot/readings', json=without_longitude).status_code == 400
+    restored = create_app({'TESTING': True, 'DATA_DIR': app.config['DATA_DIR']})
+    assert restored.test_client().get('/api/iot/readings').json['total'] == 1
+
+
 def test_upload_missing_values_restart_and_reset(app):
     client, headers = client_with_token(app)
     data = np.ones((70, 4, 3), np.float32) * 10

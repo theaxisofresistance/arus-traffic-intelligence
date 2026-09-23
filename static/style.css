@@ -10,3 +10,9 @@
 @media(max-width:1000px){.map-layout{grid-template-columns:1fr}}
 @media(max-width:760px){.map-card #sensor-map{height:430px}.map-legend{gap:10px 15px;padding:12px 16px}.warning-pill{font-size:8px}}
 .prediction-road{display:flex;align-items:center;gap:7px;margin:5px 22px 0;padding:9px 12px;border-radius:8px;background:#f4f7f1;color:var(--muted);font-size:9px}.prediction-road svg{width:14px;height:14px;color:#6f8e75}.prediction-road strong{color:var(--ink);font-size:10px;font-weight:600}
+.sidebar-bottom{padding-top:18px}.sidebar-bottom .profile{margin-top:0}
+.live-dot{width:6px;height:6px;border-radius:50%;background:#69a787;margin-left:auto;box-shadow:0 0 0 3px #69a78722}
+.iot-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:22px}.iot-last{font-size:18px;font-weight:550;letter-spacing:-.4px;line-height:1.4;margin:16px 0 14px;min-height:45px;display:flex;align-items:center}.iot-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(300px,.8fr);gap:20px}.iot-form-grid input{width:100%;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);padding:8px 10px;font-size:11px;min-height:35px}.endpoint-example{margin:0 22px 22px;padding:15px;border:1px solid var(--line);border-radius:9px;background:#f7f9f5}.endpoint-example>span{display:inline-block;background:#dfeada;color:#55724d;border-radius:4px;padding:3px 6px;font-size:8px;font-weight:700;margin-right:5px}.endpoint-example pre{margin:13px 0;padding:12px;overflow:auto;border-radius:7px;background:#173b31;color:#dceadf;font-size:10px;line-height:1.6}.endpoint-example p{color:var(--muted);font-size:9px;line-height:1.65;margin:0}
+@media(max-width:1000px){.iot-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.iot-stats{grid-template-columns:1fr 1fr}.iot-stats .stat-card:last-child{grid-column:1/-1}}
+@media(max-width:390px){.iot-stats{grid-template-columns:1fr}.iot-stats .stat-card:last-child{grid-column:auto}}

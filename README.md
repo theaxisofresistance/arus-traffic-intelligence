@@ -31,6 +31,7 @@ Buka **http://127.0.0.1:5000**. Mode demo langsung tersedia. Jika port terpakai,
 - Ringkasan flow, speed, occupancy, dan kelengkapan sensor pada sampel terakhir.
 - Grafik historis dan forecast untuk sensor/horizon pilihan.
 - Daftar sensor, pencarian, paginasi, serta ekspor prediksi per sensor ke CSV.
+- Halaman **IoT Live** untuk menerima, menyimpan, dan memantau data POST sensor.
 - Peta Leaflet interaktif dengan metadata posisi sintetis yang ditandai jelas; nilai trafik tetap berasal dari dataset aktif.
 - Backtest eksploratif, MAE/RMSE/WAPE, serta pembanding persistence.
 - Unggah dataset NPZ dan checkpoint PT dari notebook revisi.
@@ -114,12 +115,34 @@ arus_flask/
 | `GET /api/dashboard?sensor=0&horizon=12` | Ringkasan, forecast, sensor, dan metrik; horizon dalam langkah |
 | `GET /api/forecast.csv?sensor=0&horizon=12` | Forecast sensor terpilih; mencantumkan engine dan sumber |
 | `GET /api/sample.npz` | Unduh dataset demo |
+| `GET /api/iot/readings?limit=50` | Daftar data IoT terbaru (limit 1–200) |
+| `POST /api/iot/readings` | Terima pembacaan JSON dari perangkat IoT |
 | `POST /api/data` | Multipart: `file`, `interval`, `speed_unit`, `occupancy_unit` |
 | `POST /api/model` | Multipart: `file` (`.pt`) |
 | `DELETE /api/model` | Lepas model; gunakan baseline dengan dataset yang sama |
 | `POST /api/reset` | Aktifkan ulang demo |
 
-Operasi perubahan memerlukan cookie sesi dan header `X-CSRF-Token`, diperoleh dari meta tag di halaman `/`. Respons error berbentuk `{"error":"pesan"}`. Checkpoint dimuat memakai `weights_only=True`, pada CPU, dan divalidasi.
+Operasi perubahan selain endpoint POST IoT memerlukan cookie sesi dan header `X-CSRF-Token`, diperoleh dari meta tag di halaman `/`. Respons error berbentuk `{"error":"pesan"}`. Checkpoint dimuat memakai `weights_only=True`, pada CPU, dan divalidasi.
+
+### Mengirim data dari perangkat IoT
+
+Endpoint menerima JSON berisi `device_id`, `flow`, `occupancy`, `speed`, koordinat `latitude`/`longitude` opsional, dan `timestamp` ISO 8601 opsional. Contoh:
+
+```bash
+curl -X POST http://127.0.0.1:5001/api/iot/readings \
+  -H 'Content-Type: application/json' \
+  -d '{"device_id":"sensor-001","flow":120,"occupancy":0.42,"speed":48.5,"latitude":-6.2088,"longitude":106.8456}'
+```
+
+Endpoint ini tidak memerlukan API key atau cookie sesi. Maksimum 500 pembacaan terakhir disimpan di `instance/iot_readings.json`; data IoT ini belum otomatis digabungkan ke dataset forecasting. Karena endpoint menerima POST tanpa autentikasi, jangan mengekspos aplikasi langsung ke internet tanpa perlindungan jaringan yang sesuai.
+
+Sketch ESP32-S3 + NEO-6M tersedia di `notebooks/iot.ino`. Pasang library **TinyGPSPlus**, ubah kredensial Wi-Fi, pin UART bila perlu, serta `SERVER_URL` ke IP LAN komputer. Jalankan Flask agar dapat diakses dari jaringan lokal:
+
+```bash
+HOST=0.0.0.0 python app.py
+```
+
+ESP32 mengirim data simulasi setiap 5 menit mengikuti interval PEMS08. Pengiriman pertama menunggu NEO-6M memperoleh GPS fix; koordinat dan waktu berasal dari modul GPS.
 
 ## Penyimpanan dan deployment
 
