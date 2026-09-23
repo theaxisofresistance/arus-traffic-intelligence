@@ -199,9 +199,9 @@ def create_app(test_config=None):
             result = service.dashboard(sensor, horizon)
         stream = io.StringIO(newline='')
         writer = csv.writer(stream)
-        writer.writerow(['sensor_index', 'minutes_ahead', 'predicted_flow', 'engine', 'source', 'synthetic', 'revision'])
+        writer.writerow(['sensor_index', 'minutes_ahead', 'predicted_flow', 'engine', 'source', 'revision'])
         for row in result['forecast']:
-            writer.writerow([sensor, row['minute'], row['value'], result['engine'], result['source'], result['synthetic'], result['revision']])
+            writer.writerow([sensor, row['minute'], row['value'], result['engine'], result['source'], result['revision']])
         return send_file(io.BytesIO(stream.getvalue().encode('utf-8-sig')), mimetype='text/csv',
                          as_attachment=True, download_name=f'arus_forecast_sensor_{sensor:03d}.csv')
 
@@ -258,19 +258,19 @@ def create_app(test_config=None):
         return jsonify(message='Baseline aktif. Dataset tetap tersedia.')
 
     @app.post('/api/reset')
-    def reset_demo():
+    def reset_workspace():
         with lock:
             service.reset()
-        return jsonify(message='Mode demo kembali aktif.')
+        return jsonify(message='Konfigurasi default kembali aktif.')
 
-    @app.get('/api/sample.npz')
-    def sample():
-        from service import demo_data
+    @app.get('/api/reference.npz')
+    def reference_dataset():
+        from service import seed_data
         out = io.BytesIO()
         import numpy as np
-        np.savez_compressed(out, data=demo_data())
+        np.savez_compressed(out, data=seed_data())
         out.seek(0)
-        return send_file(out, as_attachment=True, download_name='arus_demo.npz', mimetype='application/octet-stream')
+        return send_file(out, as_attachment=True, download_name='arus_reference.npz', mimetype='application/octet-stream')
 
     return app
 

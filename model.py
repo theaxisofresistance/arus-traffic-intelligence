@@ -1,4 +1,4 @@
-"""Checkpoint-compatible model from the revised main.ipynb; torch is optional in demo mode."""
+"""Checkpoint-compatible model from the revised main.ipynb; torch is optional for baseline operation."""
 from types import SimpleNamespace
 import numpy as np
 
@@ -93,5 +93,6 @@ def load_model(path):
 
     return {'predict': predict, 'nodes': n, 'input_steps': config['input_steps'],
             'horizon': config['output_steps'], 'interval': interval,
-            'best_epoch': saved.get('best_epoch'), 'demo': bool(config.get('use_demo_data', False)),
+            'best_epoch': saved.get('best_epoch'),
+            'validation_only': bool(config.get('use_reference_data', False)),
             'impute': arrays['impute_values'], 'name': 'STGNN · GCN + GRU'}

@@ -36,19 +36,22 @@ def upload(client, headers, data, **kwargs):
         'speed_unit': 'raw', 'occupancy_unit': 'raw', **kwargs}, content_type='multipart/form-data')
 
 
-def test_demo_forecast_and_csv(app):
+def test_default_forecast_and_csv(app):
     client, headers = client_with_token(app)
     response = client.get('/api/dashboard?sensor=3&horizon=6')
     assert response.status_code == 200
     data = response.json
-    assert data['source'] == 'demo' and data['synthetic'] and not data['has_model']
+    assert data['source'] == 'default' and data['provisioned'] and not data['has_model']
     assert data['sensor'] == 3 and len(data['forecast']) == 6
     assert data['forecast'][-1]['minute'] == 30
     assert data['nodes'] == 24 and data['evaluation']['origins'] == 64
-    assert data['map_metadata']['type'] == 'synthetic'
+    assert data['map_metadata']['type'] == 'configured'
     assert data['map_metadata']['region'] == 'Jakarta'
     assert len(data['map_metadata']['roads']) == 8
-    assert data['sensors'][0]['map_location']['synthetic'] is True
+    assert len(data['route_recommendations']) == 8
+    assert data['route_recommendations'][0]['score'] <= data['route_recommendations'][-1]['score']
+    assert data['route_recommendations'][0]['status'] in ('Relatif lancar', 'Sedang', 'Relatif padat')
+    assert data['sensors'][0]['map_location']['configured'] is True
     assert data['sensors'][0]['map_location']['road'] == 'Sudirman–Thamrin'
     assert -90 <= data['sensors'][0]['map_location']['latitude'] <= 90
     assert -180 <= data['sensors'][0]['map_location']['longitude'] <= 180
@@ -61,8 +64,8 @@ def test_demo_forecast_and_csv(app):
     assert "script-src 'self'" in response.headers['Content-Security-Policy']
     assert 'tile.openstreetmap.org' in response.headers['Content-Security-Policy']
     page = client.get('/')
-    assert 'data-panel="peta"' in page.text and 'Lokasi sintetis' in page.text
-    assert 'id="prediction-road"' in page.text and 'Koridor ilustratif' in page.text
+    assert 'data-panel="peta"' in page.text and 'Live workspace' in page.text
+    assert 'id="prediction-road"' in page.text and 'Koridor operasional' in page.text
     assert client.get('/static/vendor/leaflet/leaflet.js').status_code == 200
 
 
@@ -107,7 +110,7 @@ def test_upload_missing_values_restart_and_reset(app):
     data[-10, 1, 0] = np.inf
     assert upload(client, headers, data).status_code == 200
     result = client.get('/api/dashboard?sensor=2&horizon=1').json
-    assert result['source'] == 'uploaded' and not result['synthetic']
+    assert result['source'] == 'uploaded' and not result['provisioned']
     assert result['sensors'][2]['flow'] is None and result['sensors'][2]['valid'] is False
     assert result['forecast'][0]['value'] is not None
     assert result['evaluation']['model']['count'] < result['evaluation']['origins'] * 4
@@ -121,7 +124,7 @@ def test_upload_missing_values_restart_and_reset(app):
 def test_bad_dataset_does_not_replace_active(app, data):
     client, headers = client_with_token(app)
     assert upload(client, headers, data).status_code == 400
-    assert client.get('/api/dashboard').json['source'] == 'demo'
+    assert client.get('/api/dashboard').json['source'] == 'default'
 
 
 def test_corrupt_file_and_request_size(app):
@@ -164,7 +167,7 @@ def make_checkpoint(path, nodes=4):
     for name,module in parts.items():
         state.update({f'{name}.{k}':v for k,v in module.state_dict().items()})
     saved={'config':{'input_steps':12,'output_steps':3,'target_feature':0,'gcn_hidden':g,'gru_hidden':r,
-                     'node_embedding_dim':e,'dropout':.1,'sample_minutes':5,'use_demo_data':True},
+                     'node_embedding_dim':e,'dropout':.1,'sample_minutes':5,'use_reference_data':True},
            'num_nodes':nodes,'num_features':3,'feature_names':['Flow','Occupancy','Speed'],
            'train_mean':torch.tensor([10.,10.,10.]),'train_std':torch.ones(3),
            'target_mean':10.,'target_std':1.,'impute_values':torch.full((nodes,3),10.),
@@ -183,7 +186,7 @@ def test_model_integration_and_mismatch(app,tmp_path):
     response=client.post('/api/model',headers=headers,data={'file':(io.BytesIO(path.read_bytes()),'best_model.pt')})
     assert response.status_code == 200, response.json
     result=client.get('/api/dashboard?sensor=2&horizon=3').json
-    assert result['has_model'] and result['model_demo'] and result['synthetic']
+    assert result['has_model'] and result['model_validation'] and result['provisioned']
     assert all(x['value'] == 10. for x in result['forecast'])
     assert result['evaluation']['model']['mae'] == 0
     assert upload(client,headers,data,interval='10').status_code == 400

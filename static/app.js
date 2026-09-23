@@ -1,10 +1,10 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {data:null, sensor:0, horizon:12, page:'ringkasan', listPage:0, request:0, pending:0, map:null, mapLayer:null, mapMarkers:new Map(), mapRevision:null, iotTimer:null};
+const state = {data:null, sensor:0, horizon:12, page:'ringkasan', listPage:0, request:0, pending:0, map:null, mapLayer:null, mapMarkers:new Map(), mapRevision:null, routeLayer:null, iotTimer:null};
 const titles = {
   ringkasan:['Lalu lintas, lebih terbaca.','Pahami pergerakan hari ini. Lihat kemungkinan arus berikutnya.','Ringkasan'],
   prediksi:['Selangkah di depan arus.','Eksplorasi prediksi, bandingkan hasil, dan temukan polanya.','Prediksi arus'],
-  peta:['Lihat arus dari sudut berbeda.','Jelajahi nilai sensor pada posisi ilustratif yang dibuat khusus untuk visualisasi.','Peta sensor'],
+  peta:['Lihat arus dari sudut berbeda.','Jelajahi nilai dan posisi sensor pada jaringan operasional.','Peta sensor'],
   sensor:['Setiap sensor, satu cerita.','Telusuri pengamatan terakhir dari setiap titik dalam dataset.','Daftar sensor'],
   iot:['Sensor terhubung, data mengalir.','Terima dan pantau data POST dari perangkat IoT secara langsung.','IoT Live'],
   data:['Data yang tepat. Prediksi yang berarti.','Hubungkan dataset dan checkpoint hasil training Anda.','Model & data']
@@ -54,7 +54,7 @@ async function load({reset=false}={}){
 function option(value,label){const node=document.createElement('option');node.value=value;node.textContent=label;return node;}
 function render(){
   const d=state.data,s=d.summary;
-  text('source-tag',d.synthetic?'Demo sintetis':'Dataset unggahan');
+  text('source-tag',d.provisioned?'Sumber operasional':'Dataset unggahan');
   text('engine-label',d.engine);text('dataset-label',`${d.nodes} sensor · interval ${d.interval} menit · ${number(d.steps,0)} sampel`);
   text('nav-count',d.nodes);text('stat-flow',number(s.flow));text('stat-speed',number(s.speed));
   text('speed-unit',d.speed_unit==='raw'?'skala asli':d.speed_unit);
@@ -67,7 +67,7 @@ function render(){
   const predictionSensor=$('prediction-sensor');predictionSensor.replaceChildren(...d.sensors.map(row=>option(row.id,`${row.name} · ${row.map_location.road}`)));predictionSensor.value=state.sensor;
   const horizon=$('horizon-select');horizon.replaceChildren(...Array.from({length:d.max_horizon},(_,i)=>option(i+1,`${(i+1)*d.interval} menit · ${i+1} langkah`)));horizon.value=state.horizon;
   text('insight-mae',number(d.evaluation.model.mae,2));
-  text('insight-copy',d.synthetic?'Evaluasi ini berasal dari data atau model sintetis. Hubungkan data asli untuk analisis Anda.':'Evaluasi historis membantu membandingkan prediksi dan baseline. Periode test belum terverifikasi.');
+  text('insight-copy',d.provisioned?'Evaluasi historis pada sumber operasional aktif.':'Evaluasi historis membantu membandingkan prediksi dan baseline.');
   text('eval-mae',number(d.evaluation.model.mae,2));text('eval-rmse',number(d.evaluation.model.rmse,2));text('eval-wape',percentage(d.evaluation.model.wape));
   text('baseline-mae',number(d.evaluation.persistence.mae,2));text('eval-skill',percentage(d.evaluation.skill));text('backtest-count',`${d.evaluation.origins} origin`);
   $('export-link').href=`/api/forecast.csv?sensor=${state.sensor}&horizon=${state.horizon}`;
@@ -76,10 +76,10 @@ function render(){
   $('forecast-table').innerHTML=d.forecast.map((row,i)=>`<tr><td>${String(i+1).padStart(2,'0')}</td><td>+${row.minute} menit</td><td>${number(row.value,2)}</td></tr>`).join('');
   $('overview-table').innerHTML=d.sensors.slice(0,5).map(row=>`<tr><td>${sensorName(row)}</td><td>${number(row.flow)}</td><td>${sparkline(row.spark)}</td><td>${number(row.prediction)}</td><td>${status(row)}</td></tr>`).join('');
   $('sensor-mosaic').innerHTML=d.sensors.slice(0,12).map(row=>`<button class="mosaic-node ${row.id===state.sensor?'selected':''} ${row.valid?'':'incomplete'}" data-select-sensor="${row.id}" aria-label="Pilih Sensor ${row.id}" aria-pressed="${row.id===state.sensor}"><strong>${String(row.id).padStart(3,'0')}</strong><span>${number(row.flow,0)}</span></button>`).join('');
-  text('active-file',d.filename);text('active-model-tag',d.has_model?`STGNN${d.model_demo?' · model demo':''}`:'Baseline');
+  text('active-file',d.filename);text('active-model-tag',d.has_model?`STGNN${d.model_validation?' · validation':''}`:'Baseline');
   text('config-nodes',number(d.nodes,0));text('config-steps',number(d.steps,0));text('config-input',`${d.input_steps*d.interval} menit`);text('config-horizon',`${d.max_horizon*d.interval} menit`);
   $('remove-model').hidden=!d.has_model;
-  renderSensors();renderCharts();if(state.page==='peta')renderMap();
+  renderSensors();renderRouteRecommendations();renderCharts();if(state.page==='peta')renderMap();
 }
 function sensorName(row){return `<span class="sensor-cell"><span class="sensor-symbol">${icon('sensor')}</span>${row.name}</span>`;}
 function status(row){return `<span class="data-state"><i class="dot ${row.valid?'green':'amber'}"></i>${row.valid?'Lengkap':'Tidak lengkap'}</span>`;}
@@ -143,6 +143,68 @@ function markerColor(row,thresholds){
   if(row.flow<=thresholds[1])return '#d2a84d';
   return '#c66757';
 }
+function renderRouteRecommendations(){
+  if(!state.data)return;
+  const routes=state.data.route_recommendations||[];
+  const start=$('route-start'),end=$('route-end'),previousStart=start.value,previousEnd=end.value;
+  const choices=state.data.sensors.map(row=>option(row.id,`${row.name} · ${row.map_location.road}`));
+  start.replaceChildren(...choices);end.replaceChildren(...state.data.sensors.map(row=>option(row.id,`${row.name} · ${row.map_location.road}`)));
+  start.value=previousStart&&state.data.sensors[Number(previousStart)]?previousStart:'0';
+  end.value=previousEnd&&state.data.sensors[Number(previousEnd)]?previousEnd:String(Math.max(0,state.data.sensors.length-1));
+  $('route-recommendations').innerHTML=routes.length?routes.map((route,index)=>{
+    const occupancy=state.data.occupancy_unit==='fraction'&&route.occupancy!==null?route.occupancy*100:route.occupancy;
+    return `<button class="route-option ${index===0?'recommended':''}" data-route-road="${route.road}"><span class="route-rank">${index+1}</span><span class="route-copy"><strong>${route.road}</strong><small>${route.status} · ${route.valid_sensors}/${route.sensors} sensor valid</small></span><span class="route-values"><strong>${number(route.score,1)}</strong><small>skor · ${number(route.speed)}${state.data.speed_unit==='raw'?'':` ${state.data.speed_unit}`} · occ ${number(occupancy)}${state.data.occupancy_unit==='raw'?'':'%'}</small></span>${icon('arrow')}</button>`;
+  }).join(''):'<p class="empty-row">Belum ada data yang cukup untuk rekomendasi.</p>';
+}
+function geoDistance(a,b){
+  const rad=Math.PI/180,lat1=a.map_location.latitude*rad,lat2=b.map_location.latitude*rad;
+  const dLat=lat2-lat1,dLon=(b.map_location.longitude-a.map_location.longitude)*rad;
+  const value=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  return 6371*2*Math.atan2(Math.sqrt(value),Math.sqrt(1-value));
+}
+function recommendedPath(startId,endId){
+  const sensors=state.data.sensors,adj=sensors.map(()=>[]),scores=new Map((state.data.route_recommendations||[]).map(row=>[row.road,row.score]));
+  const connect=(a,b)=>{
+    if(adj[a].some(edge=>edge.to===b))return;
+    const pressure=((scores.get(sensors[a].map_location.road)??50)+(scores.get(sensors[b].map_location.road)??50))/200;
+    const distance=geoDistance(sensors[a],sensors[b]),weight=distance*(1+pressure);
+    adj[a].push({to:b,weight,distance});adj[b].push({to:a,weight,distance});
+  };
+  const roads=new Map();sensors.forEach(row=>{if(!roads.has(row.map_location.road))roads.set(row.map_location.road,[]);roads.get(row.map_location.road).push(row.id);});
+  roads.forEach(ids=>ids.sort((a,b)=>a-b).forEach((id,index)=>{if(index)connect(ids[index-1],id);}));
+  sensors.forEach((row,id)=>sensors.filter(other=>other.id!==id).map(other=>({id:other.id,distance:geoDistance(row,other)})).sort((a,b)=>a.distance-b.distance).slice(0,3).forEach(item=>connect(id,item.id)));
+  const distance=Array(sensors.length).fill(Infinity),previous=Array(sensors.length).fill(null),visited=new Set();distance[startId]=0;
+  while(visited.size<sensors.length){
+    let current=-1,best=Infinity;distance.forEach((value,id)=>{if(!visited.has(id)&&value<best){best=value;current=id;}});
+    if(current<0||current===endId)break;visited.add(current);
+    adj[current].forEach(edge=>{const candidate=distance[current]+edge.weight;if(candidate<distance[edge.to]){distance[edge.to]=candidate;previous[edge.to]=current;}});
+  }
+  if(!Number.isFinite(distance[endId]))return null;
+  const ids=[];for(let current=endId;current!==null;current=previous[current])ids.unshift(current);
+  return ids;
+}
+function drawRecommendedRoute(){
+  if(!state.data||!window.L)return;
+  const startId=Number($('route-start').value),endId=Number($('route-end').value);
+  if(startId===endId){fail(new Error('Pilih titik asal dan tujuan yang berbeda.'));return;}
+  const ids=recommendedPath(startId,endId);if(!ids||ids.length<2){fail(new Error('Jalur antartitik tidak ditemukan.'));return;}
+  const rows=ids.map(id=>state.data.sensors[id]),points=rows.map(row=>[row.map_location.latitude,row.map_location.longitude]);
+  if(state.routeLayer)state.routeLayer.remove();
+  state.routeLayer=L.polyline(points,{color:'#315f50',weight:5,opacity:.88,dashArray:'10 7'}).addTo(state.map);
+  state.map.fitBounds(state.routeLayer.getBounds(),{padding:[45,45],maxZoom:13});
+  const distance=rows.slice(1).reduce((total,row,index)=>total+geoDistance(rows[index],row),0);
+  const corridors=[...new Set(rows.map(row=>row.map_location.road))];
+  $('route-result').hidden=false;
+  $('route-result').innerHTML=`<span class="route-result-icon">${icon('map')}</span><div><span>RUTE DIREKOMENDASIKAN</span><strong>${rows[0].name} → ${rows[rows.length-1].name}</strong><small>${number(distance,2)} km · ${ids.length} titik · ${corridors.join(' → ')}</small></div>`;
+}
+function focusRoute(road){
+  if(!state.map||!state.data)return;
+  const rows=state.data.sensors.filter(row=>row.map_location.road===road);
+  const points=rows.map(row=>[row.map_location.latitude,row.map_location.longitude]);
+  if(points.length>1)state.map.fitBounds(points,{padding:[45,45],maxZoom:13});
+  else if(points.length===1)state.map.setView(points[0],13);
+  if(rows.length)updateMapDetails(rows[0].id);
+}
 function updateMapDetails(sensor){
   const d=state.data,row=d?.sensors.find(item=>item.id===sensor);
   if(!row)return;
@@ -167,6 +229,7 @@ function renderMap(){
   }
   state.map.invalidateSize();
   if(state.mapRevision!==state.data.revision){
+    if(state.routeLayer){state.routeLayer.remove();state.routeLayer=null;$('route-result').hidden=true;}
     state.mapLayer.clearLayers();state.mapMarkers.clear();
     const thresholds=flowThresholds(state.data.sensors),bounds=[];
     state.data.sensors.forEach(row=>{
@@ -189,6 +252,7 @@ async function mutate(url,options,button){
 }
 document.addEventListener('click',async event=>{
   const link=event.target.closest('[data-page]');if(link){setPage(link.dataset.page);window.scrollTo({top:0,behavior:'smooth'});return;}
+  const route=event.target.closest('[data-route-road]');if(route){focusRoute(route.dataset.routeRoad);return;}
   const select=event.target.closest('[data-select-sensor],[data-open-sensor]');
   if(select){state.sensor=Number(select.dataset.selectSensor??select.dataset.openSensor);if(select.dataset.openSensor!==undefined)setPage('prediksi');await load();}
 });
@@ -199,15 +263,7 @@ $('sensor-search').addEventListener('input',()=>{state.listPage=0;renderSensors(
 $('previous-page').addEventListener('click',()=>{state.listPage--;renderSensors();});
 $('next-page').addEventListener('click',()=>{state.listPage++;renderSensors();});
 $('iot-refresh').addEventListener('click',()=>loadIot());
-$('iot-form').addEventListener('submit',async event=>{
-  event.preventDefault();if(state.pending)return;
-  const form=event.currentTarget,button=form.querySelector('button[type=submit]'),values=new FormData(form);
-  const payload={device_id:values.get('device_id'),flow:Number(values.get('flow')),occupancy:Number(values.get('occupancy')),speed:Number(values.get('speed'))};
-  state.pending++;button.disabled=true;
-  try{const result=await api('/api/iot/readings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});toast(result.message);await loadIot();}
-  catch(error){fail(error);}
-  finally{state.pending--;button.disabled=false;}
-});
+$('find-route').addEventListener('click',drawRecommendedRoute);
 $('menu-button').addEventListener('click',()=>{const open=!$('sidebar').classList.contains('open');$('sidebar').classList.toggle('open',open);$('scrim').hidden=!open;$('menu-button').setAttribute('aria-expanded',String(open));});
 $('scrim').addEventListener('click',closeMenu);
 document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMenu();});

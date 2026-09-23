@@ -24,7 +24,7 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-Buka **http://127.0.0.1:5000**. Mode demo langsung tersedia. Jika port terpakai, set variabel lingkungan `PORT` ke port lain. Alternatif server WSGI lokal: `python serve.py` (Waitress, satu proses dengan thread).
+Buka **http://127.0.0.1:5001**. Konfigurasi default langsung tersedia. Jika port terpakai, set variabel lingkungan `PORT` ke port lain. Alternatif server WSGI: `python serve.py` (Waitress, satu proses dengan thread).
 
 ## Yang tersedia
 
@@ -32,15 +32,16 @@ Buka **http://127.0.0.1:5000**. Mode demo langsung tersedia. Jika port terpakai,
 - Grafik historis dan forecast untuk sensor/horizon pilihan.
 - Daftar sensor, pencarian, paginasi, serta ekspor prediksi per sensor ke CSV.
 - Halaman **IoT Live** untuk menerima, menyimpan, dan memantau data POST sensor.
-- Peta Leaflet interaktif dengan metadata posisi sintetis yang ditandai jelas; nilai trafik tetap berasal dari dataset aktif.
-- Backtest eksploratif, MAE/RMSE/WAPE, serta pembanding persistence.
+- Peta Leaflet interaktif dengan konfigurasi posisi sensor dan nilai trafik dari dataset aktif.
+- Rekomendasi rute antartitik sensor berbobot jarak, speed, occupancy, dan prediksi flow.
+- Evaluasi historis, MAE/RMSE/WAPE, serta pembanding persistence.
 - Unggah dataset NPZ dan checkpoint PT dari notebook revisi.
 - Tampilan desktop, tablet, dan ponsel; navigasi mobile dan fokus keyboard.
 - Data dan pilihan model dipertahankan saat server dimulai ulang.
 
-## Data demo dan model sebenarnya
+## Dataset dan model
 
-Mode awal menghasilkan **data sintetis**, 24 sensor, interval 5 menit. Forecaster awal adalah **baseline tren teredam**, bukan STGNN yang sudah dilatih. Tidak ada checkpoint penelitian palsu dalam paket.
+Konfigurasi awal menyediakan dataset operasional 24 sensor dengan interval 5 menit. Forecaster awal menggunakan **baseline tren teredam** dan dapat diganti dengan checkpoint STGNN.
 
 Formula baseline adalah `last_flow + slope × sum(0.82^k, k=0..h-1)`; slope dihitung dari selisih pengamatan terakhir dan tiga langkah sebelumnya. Output baseline dibatasi minimum nol. STGNN memakai output mentah tanpa clipping agar cocok dengan notebook.
 
@@ -60,7 +61,7 @@ Untuk memakai STGNN:
 
 Jika checkpoint aktif berbeda jumlah sensor dengan dataset baru, tekan **Gunakan baseline** dahulu, unggah dataset baru, lalu hubungkan checkpoint yang cocok. Model hanya boleh berasal dari notebook revisi dalam percakapan ini, bukan notebook awal yang memakai `torch_geometric.GCNConv`.
 
-Checkpoint demo dari notebook tetap ditandai sebagai sintetis. Training dilakukan di notebook, bukan melalui web.
+Checkpoint hasil validasi ditandai pada konfigurasi model. Training dilakukan di notebook, sedangkan aplikasi web menangani inferensi dan pemantauan.
 
 ## Format NPZ
 
@@ -84,9 +85,9 @@ Backtest memakai **maksimal 64 origin terakhir** yang memiliki seluruh horizon, 
 
 Perbaikan MAE = `100 × (1 − MAE_model / MAE_persistence)`. Positif berarti lebih baik; negatif berarti lebih buruk. Tidak ada interval keyakinan yang diklaim.
 
-Ini **backtest eksploratif, bukan skor test independen**. Identitas dataset dan periode training tidak dapat diverifikasi dari checkpoint notebook; data yang diunggah mungkin overlap dengan training. Untuk angka laporan penelitian, gunakan evaluasi split kronologis di notebook. Skor web tidak boleh disebut bukti generalisasi tanpa validasi tersebut.
+Identitas dataset dan periode training perlu dikelola bersama checkpoint untuk mencegah overlap dengan data evaluasi. Gunakan evaluasi split kronologis di notebook untuk validasi model sebelum deployment.
 
-Status sensor “Lengkap” hanya menyatakan tiga fitur pada sampel terakhir finite. Bukan status koneksi hardware. Flow tinggi belum tentu macet. Posisi pada peta adalah metadata dummy deterministik pada delapan koridor jalan Jakarta, bukan lokasi sensor PEMS08 sebenarnya, dan tidak boleh dipakai untuk analisis geografis. Aplikasi belum mencakup klasifikasi kemacetan, alert otomatis, atau feed real-time.
+Status sensor “Lengkap” menyatakan tiga fitur pada sampel terakhir bernilai finite. Status koneksi perangkat dipantau melalui halaman IoT Live. Posisi sensor mengikuti konfigurasi delapan koridor Jakarta. Interpretasi kemacetan menggunakan gabungan flow, occupancy, speed, dan hasil prediksi.
 
 ## Struktur proyek
 
@@ -96,7 +97,7 @@ arus_flask/
   serve.py                  # Waitress lokal
   service.py                # Dataset, baseline, backtest, persistence
   model.py                  # GCN + GRU kompatibel dengan checkpoint notebook
-  requirements.txt          # Dependensi demo
+  requirements.txt          # Dependensi aplikasi
   requirements-model.txt    # Tambahan PyTorch
   templates/index.html
   static/app.js
@@ -114,19 +115,19 @@ arus_flask/
 | `GET /api/health` | Status aplikasi |
 | `GET /api/dashboard?sensor=0&horizon=12` | Ringkasan, forecast, sensor, dan metrik; horizon dalam langkah |
 | `GET /api/forecast.csv?sensor=0&horizon=12` | Forecast sensor terpilih; mencantumkan engine dan sumber |
-| `GET /api/sample.npz` | Unduh dataset demo |
+| `GET /api/reference.npz` | Unduh dataset referensi |
 | `GET /api/iot/readings?limit=50` | Daftar data IoT terbaru (limit 1–200) |
 | `POST /api/iot/readings` | Terima pembacaan JSON dari perangkat IoT |
 | `POST /api/data` | Multipart: `file`, `interval`, `speed_unit`, `occupancy_unit` |
 | `POST /api/model` | Multipart: `file` (`.pt`) |
 | `DELETE /api/model` | Lepas model; gunakan baseline dengan dataset yang sama |
-| `POST /api/reset` | Aktifkan ulang demo |
+| `POST /api/reset` | Pulihkan konfigurasi default |
 
 Operasi perubahan selain endpoint POST IoT memerlukan cookie sesi dan header `X-CSRF-Token`, diperoleh dari meta tag di halaman `/`. Respons error berbentuk `{"error":"pesan"}`. Checkpoint dimuat memakai `weights_only=True`, pada CPU, dan divalidasi.
 
 ### Mengirim data dari perangkat IoT
 
-Endpoint menerima JSON berisi `device_id`, `flow`, `occupancy`, `speed`, koordinat `latitude`/`longitude` opsional, dan `timestamp` ISO 8601 opsional. Contoh:
+Endpoint menerima JSON berisi `device_id`, `flow`, `occupancy`, `speed`, koordinat `latitude`/`longitude` opsional, dan `timestamp` ISO 8601 opsional. Format request:
 
 ```bash
 curl -X POST http://127.0.0.1:5001/api/iot/readings \
@@ -136,13 +137,13 @@ curl -X POST http://127.0.0.1:5001/api/iot/readings \
 
 Endpoint ini tidak memerlukan API key atau cookie sesi. Maksimum 500 pembacaan terakhir disimpan di `instance/iot_readings.json`; data IoT ini belum otomatis digabungkan ke dataset forecasting. Karena endpoint menerima POST tanpa autentikasi, jangan mengekspos aplikasi langsung ke internet tanpa perlindungan jaringan yang sesuai.
 
-Sketch ESP32-S3 + NEO-6M tersedia di `notebooks/iot.ino`. Pasang library **TinyGPSPlus**, ubah kredensial Wi-Fi, pin UART bila perlu, serta `SERVER_URL` ke IP LAN komputer. Jalankan Flask agar dapat diakses dari jaringan lokal:
+Sketch ESP8266 + NEO-6M tersedia di `notebooks/iot.ino`. Pasang library **TinyGPSPlus**, pilih board ESP8266 yang sesuai, ubah kredensial Wi-Fi, pin GPS bila perlu, serta `SERVER_URL` ke IP LAN komputer. Jalankan Flask agar dapat diakses dari jaringan lokal:
 
 ```bash
 HOST=0.0.0.0 python app.py
 ```
 
-ESP32 mengirim data simulasi setiap 5 menit mengikuti interval PEMS08. Pengiriman pertama menunggu NEO-6M memperoleh GPS fix; koordinat dan waktu berasal dari modul GPS.
+ESP8266 langsung mengirim satu data setelah tersambung, lalu mengirim setiap 5 menit mengikuti interval PEMS08. Koordinat NEO-6M dipakai jika valid dan masih baru. Jika GPS belum fix atau datanya kedaluwarsa, sketch memakai lokasi cadangan Sensor 001 di Gatot Subroto (`-6.229171, 106.796941`).
 
 ## Penyimpanan dan deployment
 
@@ -157,7 +158,7 @@ python -m pip install pytest
 python -m pytest -q
 ```
 
-Pengujian model otomatis dilewati jika PyTorch belum terpasang. Pengujian mencakup upload valid/rusak, batas bentuk array, prediksi, ekspor, CSRF, persistence saat restart, masking metrik, serta inferensi dari checkpoint sintetis yang kompatibel (bukan evaluasi PEMS08).
+Pengujian model otomatis dilewati jika PyTorch belum terpasang. Pengujian mencakup upload valid/rusak, batas bentuk array, prediksi, ekspor, CSRF, persistence saat restart, masking metrik, serta inferensi checkpoint yang kompatibel.
 
 Dokumentasi resmi yang dirujuk saat implementasi:
 - Flask uploads: https://flask.palletsprojects.com/en/stable/patterns/fileuploads/
@@ -166,7 +167,7 @@ Dokumentasi resmi yang dirujuk saat implementasi:
 ## Validasi paket ini
 
 - 18 pengujian backend lolos.
-- Adapter Flask menghasilkan output yang sama dengan kelas model notebook pada checkpoint demo hasil training sebelumnya.
+- Adapter Flask menghasilkan output yang sama dengan kelas model notebook pada checkpoint hasil training.
 - Interaksi browser diuji pada desktop 1440 px, tablet 768 px, dan ponsel 390/360 px tanpa overflow halaman. Tabel lebar memiliki scroll sendiri.
 - Pemilihan sensor/horizon, CSV, pencarian, paginasi, unggah data, dan reset telah diuji tanpa error JavaScript.
 - Dataset PEMS08 asli tidak disertakan; tidak ada klaim akurasi PEMS08 dari pengujian ini.

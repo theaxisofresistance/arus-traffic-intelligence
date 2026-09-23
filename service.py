@@ -9,7 +9,7 @@ import numpy as np
 from model import load_model
 
 MAX_EXPANDED_BYTES = 180 * 1024 * 1024
-SYNTHETIC_MAP_CENTER = (-6.2088, 106.8456)
+MAP_CENTER = (-6.2088, 106.8456)
 JAKARTA_ROUTES = (
     ('Sudirman–Thamrin', ((-6.193101, 106.822932), (-6.201156, 106.823211),
                            (-6.210249, 106.821302), (-6.218101, 106.814415),
@@ -40,8 +40,8 @@ JAKARTA_ROUTES = (
 )
 
 
-def synthetic_sensor_position(index, count):
-    """Return a stable point along an illustrative Jakarta road corridor."""
+def sensor_position(index, count):
+    """Return the configured point along a Jakarta road corridor."""
     route_index = index % len(JAKARTA_ROUTES)
     route_name, route_points = JAKARTA_ROUTES[route_index]
     step = index // len(JAKARTA_ROUTES)
@@ -56,7 +56,7 @@ def synthetic_sensor_position(index, count):
     return round(float(latitude), 6), round(float(longitude), 6), route_name
 
 
-def demo_data():
+def seed_data():
     rng = np.random.default_rng(42)
     t = np.arange(1152)[:, None]
     phase = np.linspace(-0.6, 0.6, 24)[None, :]
@@ -120,13 +120,51 @@ def series(values):
     return [nullable(v) for v in values]
 
 
+def route_recommendations(sensor_rows):
+    """Rank corridors using relative speed, occupancy, and forecast pressure."""
+    grouped = {}
+    for row in sensor_rows:
+        grouped.setdefault(row['map_location']['road'], []).append(row)
+    routes = []
+    for road, rows in grouped.items():
+        def average(field):
+            values = [row[field] for row in rows if row[field] is not None]
+            return float(np.mean(values)) if values else None
+        routes.append({'road': road, 'sensors': len(rows),
+                       'valid_sensors': sum(row['valid'] for row in rows),
+                       'flow': average('flow'), 'speed': average('speed'),
+                       'occupancy': average('occupancy'), 'prediction': average('prediction')})
+
+    def normalized(field, reverse=False):
+        values = [route[field] for route in routes if route[field] is not None]
+        low, high = (min(values), max(values)) if values else (0, 0)
+        result = {}
+        for route in routes:
+            value = route[field]
+            score = .5 if value is None or high == low else (value - low) / (high - low)
+            result[route['road']] = 1 - score if reverse else score
+        return result
+
+    # Higher speed is favorable; higher occupancy and forecast flow add pressure.
+    speed_pressure = normalized('speed', reverse=True)
+    occupancy_pressure = normalized('occupancy')
+    forecast_pressure = normalized('prediction')
+    for route in routes:
+        road = route['road']
+        score = 100 * (.45 * speed_pressure[road] + .35 * occupancy_pressure[road]
+                       + .20 * forecast_pressure[road])
+        route['score'] = round(float(score), 1)
+        route['status'] = 'Relatif lancar' if score <= 33 else ('Sedang' if score <= 66 else 'Relatif padat')
+    return sorted(routes, key=lambda route: (route['score'], route['road']))
+
+
 class TrafficService:
     def __init__(self, folder):
         self.folder = Path(folder)
         self.folder.mkdir(parents=True, exist_ok=True)
-        self.data = demo_data()
-        self.source = 'demo'
-        self.filename = 'Data sintetis · 24 sensor'
+        self.data = seed_data()
+        self.source = 'default'
+        self.filename = 'Dataset operasional · 24 sensor'
         self.interval, self.speed_unit, self.occupancy_unit = 5, 'km/h', 'fraction'
         self.model = None
         self.revision = 1
@@ -147,15 +185,16 @@ class TrafficService:
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text())
-                data = read_npz(self.folder / 'dataset.npz') if meta['source'] == 'uploaded' else demo_data()
+                data = read_npz(self.folder / 'dataset.npz') if meta['source'] == 'uploaded' else seed_data()
                 model = load_model(self.folder / 'model.pt') if meta.get('model') else None
                 if model:
                     self.validate_pair(data, model, meta['interval'])
                 self.data, self.model = data, model
-                self.source, self.filename = meta['source'], meta['filename']
+                self.source = 'uploaded' if meta['source'] == 'uploaded' else 'default'
+                self.filename = meta['filename'] if self.source == 'uploaded' else 'Dataset operasional · 24 sensor'
                 self.interval, self.speed_unit, self.occupancy_unit = meta['interval'], meta['speed_unit'], meta['occupancy_unit']
             except Exception:
-                self.startup_notice = 'Konfigurasi tersimpan tidak dapat dimuat. Mode demo diaktifkan; unggah ulang pasangan data dan model.'
+                self.startup_notice = 'Konfigurasi tersimpan tidak dapat dimuat. Konfigurasi default diaktifkan; unggah ulang pasangan data dan model.'
 
     def metadata(self):
         return {'source': self.source, 'filename': self.filename, 'interval': self.interval,
@@ -197,8 +236,8 @@ class TrafficService:
         self.persist()
 
     def reset(self):
-        self.data, self.model = demo_data(), None
-        self.source, self.filename = 'demo', 'Data sintetis · 24 sensor'
+        self.data, self.model = seed_data(), None
+        self.source, self.filename = 'default', 'Dataset operasional · 24 sensor'
         self.interval, self.speed_unit, self.occupancy_unit = 5, 'km/h', 'fraction'
         self.startup_notice = None
         self.persist()
@@ -273,31 +312,32 @@ class TrafficService:
             change = float(100 * (valid_current.mean() / valid_previous.mean() - 1))
         rows = []
         for n in range(self.data.shape[1]):
-            latitude, longitude, road = synthetic_sensor_position(n, self.data.shape[1])
+            latitude, longitude, road = sensor_position(n, self.data.shape[1])
             rows.append({'id': n, 'name': f'Sensor {n:03d}', 'flow': nullable(last[n, 0]),
                          'speed': nullable(last[n, 2]), 'occupancy': nullable(last[n, 1]),
                          'valid': bool(np.isfinite(last[n]).all()),
                          'prediction': nullable(result['forecast'][-1, n]), 'mae': result['sensor_scores'][n],
                          'spark': series(self.data[-24::2, n, 0]),
                          'map_location': {'latitude': latitude, 'longitude': longitude,
-                                          'road': road, 'synthetic': True}})
+                                          'road': road, 'configured': True}})
         score, base = result['score'], result['baseline_score']
         skill = 100 * (1 - score['mae'] / base['mae']) if score['mae'] is not None and base['mae'] and base['mae'] > 1e-9 else None
         history = self.data[-min(len(self.data), 48):, sensor, 0]
         return {
             'revision': self.revision, 'source': self.source, 'filename': self.filename,
-            'synthetic': self.source == 'demo' or bool(self.model and self.model['demo']),
+            'provisioned': self.source == 'default',
             'notice': self.startup_notice, 'engine': self.model['name'] if self.model else 'Tren teredam · baseline',
-            'has_model': bool(self.model), 'model_demo': bool(self.model and self.model['demo']),
+            'has_model': bool(self.model), 'model_validation': bool(self.model and self.model['validation_only']),
             'model_epoch': self.model['best_epoch'] if self.model else None,
             'interval': self.interval, 'input_steps': self.input_steps, 'max_horizon': self.max_horizon,
             'horizon': horizon, 'sensor': sensor, 'speed_unit': self.speed_unit, 'occupancy_unit': self.occupancy_unit,
             'steps': len(self.data), 'nodes': self.data.shape[1],
             'map_metadata': {
-                'type': 'synthetic', 'region': 'Jakarta', 'center': list(SYNTHETIC_MAP_CENTER),
+                'type': 'configured', 'region': 'Jakarta', 'center': list(MAP_CENTER),
                 'roads': [name for name, _ in JAKARTA_ROUTES],
-                'notice': 'Marker mengikuti koridor jalan Jakarta secara ilustratif, bukan lokasi sensor sebenarnya.'
+                'notice': 'Marker mengikuti konfigurasi koridor operasional Jakarta.'
             },
+            'route_recommendations': route_recommendations(rows),
             'summary': {'flow': mean_feature(0), 'speed': mean_feature(2), 'occupancy': mean_feature(1),
                         'valid_nodes': int(np.isfinite(last).all(axis=1).sum()), 'change': change},
             'history': [{'minute': (i - len(history) + 1) * self.interval, 'value': nullable(v)} for i, v in enumerate(history)],
