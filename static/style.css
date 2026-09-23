@@ -9,3 +9,4 @@
 @media(min-width:1600px){.map-card #sensor-map{height:580px}}
 @media(max-width:1000px){.map-layout{grid-template-columns:1fr}}
 @media(max-width:760px){.map-card #sensor-map{height:430px}.map-legend{gap:10px 15px;padding:12px 16px}.warning-pill{font-size:8px}}
+.prediction-road{display:flex;align-items:center;gap:7px;margin:5px 22px 0;padding:9px 12px;border-radius:8px;background:#f4f7f1;color:var(--muted);font-size:9px}.prediction-road svg{width:14px;height:14px;color:#6f8e75}.prediction-road strong{color:var(--ink);font-size:10px;font-weight:600}

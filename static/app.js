@@ -60,16 +60,16 @@ function render(){
   text('flow-change',s.change===null?'—':`${s.change>0?'+':''}${number(s.change)}%`);
   text('change-label',`vs ${Math.min(12,d.steps-1)*d.interval} menit sebelumnya`);
   text('forecast-span',`+${d.horizon*d.interval} menit`);
-  for(const id of ['overview-sensor','prediction-sensor']){
-    const select=$(id);select.replaceChildren(...d.sensors.map(row=>option(row.id,row.name)));select.value=state.sensor;
-  }
+  const overviewSensor=$('overview-sensor');overviewSensor.replaceChildren(...d.sensors.map(row=>option(row.id,row.name)));overviewSensor.value=state.sensor;
+  const predictionSensor=$('prediction-sensor');predictionSensor.replaceChildren(...d.sensors.map(row=>option(row.id,`${row.name} · ${row.map_location.road}`)));predictionSensor.value=state.sensor;
   const horizon=$('horizon-select');horizon.replaceChildren(...Array.from({length:d.max_horizon},(_,i)=>option(i+1,`${(i+1)*d.interval} menit · ${i+1} langkah`)));horizon.value=state.horizon;
   text('insight-mae',number(d.evaluation.model.mae,2));
   text('insight-copy',d.synthetic?'Evaluasi ini berasal dari data atau model sintetis. Hubungkan data asli untuk analisis Anda.':'Evaluasi historis membantu membandingkan prediksi dan baseline. Periode test belum terverifikasi.');
   text('eval-mae',number(d.evaluation.model.mae,2));text('eval-rmse',number(d.evaluation.model.rmse,2));text('eval-wape',percentage(d.evaluation.model.wape));
   text('baseline-mae',number(d.evaluation.persistence.mae,2));text('eval-skill',percentage(d.evaluation.skill));text('backtest-count',`${d.evaluation.origins} origin`);
   $('export-link').href=`/api/forecast.csv?sensor=${state.sensor}&horizon=${state.horizon}`;
-  text('forecast-table-label',`Sensor ${String(state.sensor).padStart(3,'0')} · skala flow asli`);
+  const selected=d.sensors[state.sensor];text('prediction-road',selected.map_location.road);
+  text('forecast-table-label',`Sensor ${String(state.sensor).padStart(3,'0')} · ${selected.map_location.road} · skala flow asli`);
   $('forecast-table').innerHTML=d.forecast.map((row,i)=>`<tr><td>${String(i+1).padStart(2,'0')}</td><td>+${row.minute} menit</td><td>${number(row.value,2)}</td></tr>`).join('');
   $('overview-table').innerHTML=d.sensors.slice(0,5).map(row=>`<tr><td>${sensorName(row)}</td><td>${number(row.flow)}</td><td>${sparkline(row.spark)}</td><td>${number(row.prediction)}</td><td>${status(row)}</td></tr>`).join('');
   $('sensor-mosaic').innerHTML=d.sensors.slice(0,12).map(row=>`<button class="mosaic-node ${row.id===state.sensor?'selected':''} ${row.valid?'':'incomplete'}" data-select-sensor="${row.id}" aria-label="Pilih Sensor ${row.id}" aria-pressed="${row.id===state.sensor}"><strong>${String(row.id).padStart(3,'0')}</strong><span>${number(row.flow,0)}</span></button>`).join('');

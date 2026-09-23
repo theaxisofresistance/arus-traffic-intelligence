@@ -62,6 +62,7 @@ def test_demo_forecast_and_csv(app):
     assert 'tile.openstreetmap.org' in response.headers['Content-Security-Policy']
     page = client.get('/')
     assert 'data-panel="peta"' in page.text and 'Lokasi sintetis' in page.text
+    assert 'id="prediction-road"' in page.text and 'Koridor ilustratif' in page.text
     assert client.get('/static/vendor/leaflet/leaflet.js').status_code == 200
 
 
