@@ -9,6 +9,51 @@ import numpy as np
 from model import load_model
 
 MAX_EXPANDED_BYTES = 180 * 1024 * 1024
+SYNTHETIC_MAP_CENTER = (-6.2088, 106.8456)
+JAKARTA_ROUTES = (
+    ('Sudirman–Thamrin', ((-6.193101, 106.822932), (-6.201156, 106.823211),
+                           (-6.210249, 106.821302), (-6.218101, 106.814415),
+                           (-6.220987, 106.810756), (-6.226878, 106.802483))),
+    ('Gatot Subroto', ((-6.229171, 106.796941), (-6.219047, 106.812739),
+                        (-6.231964, 106.821051), (-6.240116, 106.832642),
+                        (-6.243023, 106.842972))),
+    ('Rasuna Said', ((-6.207019, 106.829964), (-6.218132, 106.831192),
+                      (-6.224322, 106.834064), (-6.231895, 106.832714),
+                      (-6.238032, 106.826652), (-6.240985, 106.836946))),
+    ('S. Parman', ((-6.165998, 106.788995), (-6.177683, 106.795127),
+                    (-6.193748, 106.797472), (-6.205528, 106.801940),
+                    (-6.212429, 106.808078), (-6.218902, 106.799976))),
+    ('Ahmad Yani', ((-6.193790, 106.889875), (-6.192335, 106.874046),
+                     (-6.180772, 106.875665), (-6.175400, 106.876088),
+                     (-6.166864, 106.878515), (-6.165851, 106.872951))),
+    ('T.B. Simatupang', ((-6.288830, 106.780134), (-6.291773, 106.785864),
+                          (-6.292172, 106.818433), (-6.302509, 106.839080),
+                          (-6.304084, 106.850866), (-6.302300, 106.859052),
+                          (-6.302701, 106.868120))),
+    ('Daan Mogot', ((-6.153006, 106.703944), (-6.155513, 106.713820),
+                     (-6.154784, 106.731152), (-6.155205, 106.747592),
+                     (-6.158383, 106.761819), (-6.164818, 106.779181),
+                     (-6.165998, 106.788995))),
+    ('Gunung Sahari', ((-6.134990, 106.832045), (-6.145338, 106.834357),
+                        (-6.157775, 106.837115), (-6.175042, 106.841462),
+                        (-6.185971, 106.844855))),
+)
+
+
+def synthetic_sensor_position(index, count):
+    """Return a stable point along an illustrative Jakarta road corridor."""
+    route_index = index % len(JAKARTA_ROUTES)
+    route_name, route_points = JAKARTA_ROUTES[route_index]
+    step = index // len(JAKARTA_ROUTES)
+    route_steps = max(2, int(np.ceil(count / len(JAKARTA_ROUTES))))
+    points = np.asarray(route_points, dtype=np.float64)
+    lengths = np.sqrt(np.square(np.diff(points, axis=0)).sum(axis=1))
+    cumulative = np.concatenate(([0.0], np.cumsum(lengths)))
+    target = cumulative[-1] * min(step / (route_steps - 1), 1.0)
+    segment = min(int(np.searchsorted(cumulative, target, side='right') - 1), len(lengths) - 1)
+    fraction = (target - cumulative[segment]) / lengths[segment] if lengths[segment] else 0.0
+    latitude, longitude = points[segment] + fraction * (points[segment + 1] - points[segment])
+    return round(float(latitude), 6), round(float(longitude), 6), route_name
 
 
 def demo_data():
@@ -228,11 +273,14 @@ class TrafficService:
             change = float(100 * (valid_current.mean() / valid_previous.mean() - 1))
         rows = []
         for n in range(self.data.shape[1]):
+            latitude, longitude, road = synthetic_sensor_position(n, self.data.shape[1])
             rows.append({'id': n, 'name': f'Sensor {n:03d}', 'flow': nullable(last[n, 0]),
                          'speed': nullable(last[n, 2]), 'occupancy': nullable(last[n, 1]),
                          'valid': bool(np.isfinite(last[n]).all()),
                          'prediction': nullable(result['forecast'][-1, n]), 'mae': result['sensor_scores'][n],
-                         'spark': series(self.data[-24::2, n, 0])})
+                         'spark': series(self.data[-24::2, n, 0]),
+                         'map_location': {'latitude': latitude, 'longitude': longitude,
+                                          'road': road, 'synthetic': True}})
         score, base = result['score'], result['baseline_score']
         skill = 100 * (1 - score['mae'] / base['mae']) if score['mae'] is not None and base['mae'] and base['mae'] > 1e-9 else None
         history = self.data[-min(len(self.data), 48):, sensor, 0]
@@ -245,6 +293,11 @@ class TrafficService:
             'interval': self.interval, 'input_steps': self.input_steps, 'max_horizon': self.max_horizon,
             'horizon': horizon, 'sensor': sensor, 'speed_unit': self.speed_unit, 'occupancy_unit': self.occupancy_unit,
             'steps': len(self.data), 'nodes': self.data.shape[1],
+            'map_metadata': {
+                'type': 'synthetic', 'region': 'Jakarta', 'center': list(SYNTHETIC_MAP_CENTER),
+                'roads': [name for name, _ in JAKARTA_ROUTES],
+                'notice': 'Marker mengikuti koridor jalan Jakarta secara ilustratif, bukan lokasi sensor sebenarnya.'
+            },
             'summary': {'flow': mean_feature(0), 'speed': mean_feature(2), 'occupancy': mean_feature(1),
                         'valid_nodes': int(np.isfinite(last).all(axis=1).sum()), 'change': change},
             'history': [{'minute': (i - len(history) + 1) * self.interval, 'value': nullable(v)} for i, v in enumerate(history)],

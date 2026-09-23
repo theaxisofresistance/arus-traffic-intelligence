@@ -1,9 +1,10 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {data:null, sensor:0, horizon:12, page:'ringkasan', listPage:0, request:0, pending:0};
+const state = {data:null, sensor:0, horizon:12, page:'ringkasan', listPage:0, request:0, pending:0, map:null, mapLayer:null, mapMarkers:new Map(), mapRevision:null};
 const titles = {
   ringkasan:['Lalu lintas, lebih terbaca.','Pahami pergerakan hari ini. Lihat kemungkinan arus berikutnya.','Ringkasan'],
   prediksi:['Selangkah di depan arus.','Eksplorasi prediksi, bandingkan hasil, dan temukan polanya.','Prediksi arus'],
+  peta:['Lihat arus dari sudut berbeda.','Jelajahi nilai sensor pada posisi ilustratif yang dibuat khusus untuk visualisasi.','Peta sensor'],
   sensor:['Setiap sensor, satu cerita.','Telusuri pengamatan terakhir dari setiap titik dalam dataset.','Daftar sensor'],
   data:['Data yang tepat. Prediksi yang berarti.','Hubungkan dataset dan checkpoint hasil training Anda.','Model & data']
 };
@@ -21,7 +22,7 @@ function setPage(page){
   document.querySelectorAll('.nav-item').forEach(el=>{el.classList.toggle('active',el.dataset.page===page);el.setAttribute('aria-current',el.dataset.page===page?'page':'false');});
   text('page-title',titles[page][0]);text('page-subtitle',titles[page][1]);text('breadcrumb-title',titles[page][2]);
   history.replaceState(null,'',`#${page}`);closeMenu();
-  if(state.data){renderCharts();if(page==='sensor')renderSensors();}
+  if(state.data){renderCharts();if(page==='sensor')renderSensors();if(page==='peta')setTimeout(renderMap,0);}
 }
 async function api(url, options={}){
   const headers = {...options.headers};
@@ -75,7 +76,7 @@ function render(){
   text('active-file',d.filename);text('active-model-tag',d.has_model?`STGNN${d.model_demo?' · model demo':''}`:'Baseline');
   text('config-nodes',number(d.nodes,0));text('config-steps',number(d.steps,0));text('config-input',`${d.input_steps*d.interval} menit`);text('config-horizon',`${d.max_horizon*d.interval} menit`);
   $('remove-model').hidden=!d.has_model;
-  renderSensors();renderCharts();
+  renderSensors();renderCharts();if(state.page==='peta')renderMap();
 }
 function sensorName(row){return `<span class="sensor-cell"><span class="sensor-symbol">${icon('sensor')}</span>${row.name}</span>`;}
 function status(row){return `<span class="data-state"><i class="dot ${row.valid?'green':'amber'}"></i>${row.valid?'Lengkap':'Tidak lengkap'}</span>`;}
@@ -116,6 +117,54 @@ function renderSensors(){
   text('pagination-label',rows.length?`${start+1}–${Math.min(start+count,rows.length)} dari ${rows.length} sensor`:'0 sensor');
   $('previous-page').disabled=state.listPage===0;$('next-page').disabled=state.listPage>=lastPage;
 }
+function flowThresholds(rows){
+  const values=rows.map(row=>row.flow).filter(Number.isFinite).sort((a,b)=>a-b);
+  if(!values.length)return [0,0];
+  return [values[Math.floor((values.length-1)/3)],values[Math.floor((values.length-1)*2/3)]];
+}
+function markerColor(row,thresholds){
+  if(!row.valid)return '#d99a55';
+  if(row.flow<=thresholds[0])return '#6ca98c';
+  if(row.flow<=thresholds[1])return '#d2a84d';
+  return '#c66757';
+}
+function updateMapDetails(sensor){
+  const d=state.data,row=d?.sensors.find(item=>item.id===sensor);
+  if(!row)return;
+  state.sensor=row.id;
+  text('map-sensor-name',row.name);text('map-road',row.map_location.road);text('map-flow',number(row.flow));
+  text('map-speed',`${number(row.speed)}${d.speed_unit==='raw'?'':` ${d.speed_unit}`}`);
+  const occupancy=d.occupancy_unit==='fraction'&&row.occupancy!==null?row.occupancy*100:row.occupancy;
+  text('map-occupancy',`${number(occupancy)}${d.occupancy_unit==='raw'?'':'%'}`);
+  text('map-prediction',number(row.prediction));
+  $('map-open-prediction').dataset.openSensor=String(row.id);
+  const thresholds=flowThresholds(d.sensors);
+  state.mapMarkers.forEach((marker,id)=>marker.setStyle({radius:id===row.id?9:6,weight:id===row.id?4:2,color:id===row.id?'#173f35':'#ffffff',fillColor:markerColor(d.sensors[id],thresholds),fillOpacity:.9}));
+}
+function renderMap(){
+  if(!state.data||state.page!=='peta')return;
+  const holder=$('sensor-map');
+  if(!window.L){holder.textContent='Library peta tidak dapat dimuat.';return;}
+  if(!state.map){
+    state.map=L.map(holder,{zoomControl:true,minZoom:8,maxZoom:16}).setView(state.data.map_metadata.center,10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(state.map);
+    state.mapLayer=L.layerGroup().addTo(state.map);
+  }
+  state.map.invalidateSize();
+  if(state.mapRevision!==state.data.revision){
+    state.mapLayer.clearLayers();state.mapMarkers.clear();
+    const thresholds=flowThresholds(state.data.sensors),bounds=[];
+    state.data.sensors.forEach(row=>{
+      const location=row.map_location,latlng=[location.latitude,location.longitude];bounds.push(latlng);
+      const marker=L.circleMarker(latlng,{radius:6,weight:2,color:'#fff',fillColor:markerColor(row,thresholds),fillOpacity:.9});
+      marker.bindTooltip(`${row.name} · ${location.road} · Flow ${number(row.flow)}`,{direction:'top'});
+      marker.on('click',()=>updateMapDetails(row.id));marker.addTo(state.mapLayer);state.mapMarkers.set(row.id,marker);
+    });
+    if(bounds.length)state.map.fitBounds(bounds,{padding:[28,28],maxZoom:11});
+    state.mapRevision=state.data.revision;
+  }
+  text('map-notice',state.data.map_metadata.notice);updateMapDetails(state.sensor);
+}
 async function mutate(url,options,button){
   if(state.pending)return;
   state.pending++;button.disabled=true;
@@ -145,6 +194,6 @@ $('remove-model').addEventListener('click',()=>mutate('/api/model',{method:'DELE
 $('reset-button').addEventListener('click',()=>$('reset-dialog').showModal());
 $('cancel-reset').addEventListener('click',()=>$('reset-dialog').close());
 $('confirm-reset').addEventListener('click',()=>{$('reset-dialog').close();mutate('/api/reset',{method:'POST'},$('reset-button'));});
-let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(renderCharts,120);});
+let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{renderCharts();if(state.map)state.map.invalidateSize();},120);});
 window.addEventListener('hashchange',()=>setPage(location.hash.slice(1)));
 setPage(location.hash.slice(1)||'ringkasan');load({reset:true});

@@ -31,6 +31,7 @@ Buka **http://127.0.0.1:5000**. Mode demo langsung tersedia. Jika port terpakai,
 - Ringkasan flow, speed, occupancy, dan kelengkapan sensor pada sampel terakhir.
 - Grafik historis dan forecast untuk sensor/horizon pilihan.
 - Daftar sensor, pencarian, paginasi, serta ekspor prediksi per sensor ke CSV.
+- Peta Leaflet interaktif dengan metadata posisi sintetis yang ditandai jelas; nilai trafik tetap berasal dari dataset aktif.
 - Backtest eksploratif, MAE/RMSE/WAPE, serta pembanding persistence.
 - Unggah dataset NPZ dan checkpoint PT dari notebook revisi.
 - Tampilan desktop, tablet, dan ponsel; navigasi mobile dan fokus keyboard.
@@ -84,7 +85,7 @@ Perbaikan MAE = `100 × (1 − MAE_model / MAE_persistence)`. Positif berarti le
 
 Ini **backtest eksploratif, bukan skor test independen**. Identitas dataset dan periode training tidak dapat diverifikasi dari checkpoint notebook; data yang diunggah mungkin overlap dengan training. Untuk angka laporan penelitian, gunakan evaluasi split kronologis di notebook. Skor web tidak boleh disebut bukti generalisasi tanpa validasi tersebut.
 
-Status sensor “Lengkap” hanya menyatakan tiga fitur pada sampel terakhir finite. Bukan status koneksi hardware. Flow tinggi belum tentu macet. Aplikasi belum mencakup klasifikasi kemacetan, alert otomatis, peta geografis, atau feed real-time.
+Status sensor “Lengkap” hanya menyatakan tiga fitur pada sampel terakhir finite. Bukan status koneksi hardware. Flow tinggi belum tentu macet. Posisi pada peta adalah metadata dummy deterministik pada delapan koridor jalan Jakarta, bukan lokasi sensor PEMS08 sebenarnya, dan tidak boleh dipakai untuk analisis geografis. Aplikasi belum mencakup klasifikasi kemacetan, alert otomatis, atau feed real-time.
 
 ## Struktur proyek
 

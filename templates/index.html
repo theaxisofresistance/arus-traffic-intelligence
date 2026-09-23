@@ -5,7 +5,9 @@
   <meta name="csrf-token" content="{{ csrf }}"><meta name="theme-color" content="#123b35">
   <title>ARUS — Traffic Intelligence</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script defer src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script defer src="{{ url_for('static', filename='app.js') }}"></script>
 </head>
 <body>
@@ -25,6 +27,7 @@
 <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
 <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
 <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="i-map" viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3Zm6-3v15m6-12v15"/></symbol>
 </defs></svg>
 <div class="scrim" id="scrim" hidden></div>
 <aside class="sidebar" id="sidebar" aria-label="Navigasi utama">
@@ -35,6 +38,7 @@
   <nav>
     <button class="nav-item active" data-page="ringkasan"><svg><use href="#i-grid"/></svg>Ringkasan<span class="nav-indicator"></span></button>
     <button class="nav-item" data-page="prediksi"><svg><use href="#i-chart"/></svg>Prediksi arus</button>
+    <button class="nav-item" data-page="peta"><svg><use href="#i-map"/></svg>Peta sensor</button>
     <button class="nav-item" data-page="sensor"><svg><use href="#i-sensor"/></svg>Daftar sensor<span class="nav-count" id="nav-count">—</span></button>
     <button class="nav-item" data-page="data"><svg><use href="#i-box"/></svg>Model & data</button>
   </nav>
@@ -64,6 +68,14 @@
     <section data-panel="prediksi" hidden>
       <article class="card"><div class="card-header"><div><div class="overline">FORECAST EXPLORER</div><h2>Prediksi per sensor</h2><p>Pilih sensor dan jangkauan waktu, lalu jalankan prediksi.</p></div><a id="export-link" class="button secondary" href="/api/forecast.csv"><svg><use href="#i-down"/></svg>Ekspor CSV</a></div><div class="prediction-controls"><label>Sensor<select id="prediction-sensor"></select></label><label>Horizon prediksi<select id="horizon-select"></select></label><button id="forecast-button" class="button primary"><svg><use href="#i-chart"/></svg>Jalankan prediksi</button><span id="forecast-status" class="muted" role="status"></span></div><div class="legend prediction-legend"><span><i class="legend-line"></i>Historis</span><span><i class="legend-line dashed"></i>Prediksi</span></div><div id="prediction-chart" class="chart chart-large"></div><p class="chart-caption">Flow mengikuti skala asli dataset. Prediksi tidak menyertakan interval ketidakpastian.</p></article>
       <div class="evaluation-grid"><article class="card"><div class="card-header"><div><div class="overline">HISTORICAL BACKTEST</div><h2>Seberapa dekat prediksinya?</h2></div><span id="backtest-count" class="pill">— origin</span></div><p class="section-note">Backtest eksploratif pada maksimal 64 origin terakhir, seluruh sensor dan horizon. Ini bukan skor test yang terverifikasi; data bisa overlap dengan periode training model.</p><div class="metric-row"><div><span>MAE</span><strong id="eval-mae">—</strong></div><div><span>RMSE</span><strong id="eval-rmse">—</strong></div><div><span>WAPE</span><strong id="eval-wape">—</strong></div></div><div class="comparison"><span>MAE persistence</span><strong id="baseline-mae">—</strong></div><div class="comparison"><span>Perbaikan MAE terhadap persistence</span><strong id="eval-skill">—</strong></div><p class="fineprint padded">Nilai perbaikan positif berarti model lebih baik. Angka negatif berarti baseline lebih baik. Target yang hilang tidak dihitung.</p></article><article class="card"><div class="card-header"><div><h2>Detail proyeksi</h2><p id="forecast-table-label">Sensor terpilih</p></div><span class="pill">Flow</span></div><div class="table-scroll forecast-table-scroll"><table><thead><tr><th>Langkah</th><th>Waktu ke depan</th><th>Prediksi</th></tr></thead><tbody id="forecast-table"></tbody></table></div></article></div>
+    </section>
+
+    <section data-panel="peta" hidden>
+      <div class="map-layout">
+        <article class="card map-card"><div class="card-header"><div><div class="overline">SYNTHETIC SENSOR MAP</div><h2>Sebaran sensor ilustratif</h2><p>Nilai trafik berasal dari dataset aktif; posisi marker adalah metadata dummy.</p></div><span class="pill warning-pill">Lokasi sintetis</span></div><div id="sensor-map" role="application" aria-label="Peta interaktif posisi sintetis sensor"></div><div class="map-legend"><span><i class="map-dot low"></i>Flow relatif rendah</span><span><i class="map-dot medium"></i>Sedang</span><span><i class="map-dot high"></i>Tinggi</span><span><i class="map-dot incomplete"></i>Data tidak lengkap</span></div></article>
+        <aside class="card map-details"><div class="card-header"><div><div class="overline">TITIK TERPILIH</div><h2 id="map-sensor-name">Pilih marker</h2><p>Snapshot pada sampel terakhir.</p></div><span class="stat-icon mint"><svg><use href="#i-map"/></svg></span></div><dl class="map-metrics"><div><dt>Koridor ilustratif</dt><dd id="map-road">—</dd></div><div><dt>Flow</dt><dd id="map-flow">—</dd></div><div><dt>Speed</dt><dd id="map-speed">—</dd></div><div><dt>Occupancy</dt><dd id="map-occupancy">—</dd></div><div><dt>Prediksi akhir</dt><dd id="map-prediction">—</dd></div></dl><button id="map-open-prediction" class="button primary full-width">Buka prediksi sensor <svg><use href="#i-arrow"/></svg></button><div class="map-warning"><svg><use href="#i-info"/></svg><p id="map-notice">Marker mengikuti koridor jalan Jakarta secara ilustratif, bukan lokasi sensor sebenarnya.</p></div></aside>
+      </div>
+      <p class="section-note map-disclaimer">Peta dasar hanya memberi konteks visual. Marker tidak boleh digunakan untuk navigasi, analisis geografis, atau klaim lokasi sensor PEMS08.</p>
     </section>
 
     <section data-panel="sensor" hidden><article class="card"><div class="card-header"><div><div class="overline">SENSOR DIRECTORY</div><h2>Kenali setiap titik</h2><p>Indeks sensor mengikuti urutan dataset, mulai dari 0.</p></div><label class="search"><svg><use href="#i-search"/></svg><input id="sensor-search" placeholder="Cari sensor…" aria-label="Cari sensor"></label></div><div class="table-scroll"><table><thead><tr><th>Sensor</th><th>Flow</th><th>Speed</th><th>Occupancy</th><th>Prediksi akhir</th><th>MAE backtest</th><th>Data</th><th></th></tr></thead><tbody id="sensor-table"></tbody></table></div><div class="pagination"><span id="pagination-label">—</span><div><button id="previous-page" class="button secondary small">Sebelumnya</button><button id="next-page" class="button secondary small">Berikutnya</button></div></div></article><p class="section-note">“Lengkap” berarti ketiga fitur pada sampel terakhir valid, bukan status koneksi sensor secara real-time.</p></section>

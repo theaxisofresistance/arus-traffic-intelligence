@@ -45,6 +45,13 @@ def test_demo_forecast_and_csv(app):
     assert data['sensor'] == 3 and len(data['forecast']) == 6
     assert data['forecast'][-1]['minute'] == 30
     assert data['nodes'] == 24 and data['evaluation']['origins'] == 64
+    assert data['map_metadata']['type'] == 'synthetic'
+    assert data['map_metadata']['region'] == 'Jakarta'
+    assert len(data['map_metadata']['roads']) == 8
+    assert data['sensors'][0]['map_location']['synthetic'] is True
+    assert data['sensors'][0]['map_location']['road'] == 'Sudirman–Thamrin'
+    assert -90 <= data['sensors'][0]['map_location']['latitude'] <= 90
+    assert -180 <= data['sensors'][0]['map_location']['longitude'] <= 180
     assert data['evaluation']['model']['count'] == 64*6*24
     csv = client.get('/api/forecast.csv?sensor=3&horizon=6')
     assert csv.status_code == 200 and 'attachment' in csv.headers['Content-Disposition']
@@ -52,6 +59,10 @@ def test_demo_forecast_and_csv(app):
     assert len(csv.text.strip().splitlines()) == 7
     assert client.get('/api/health').json['status'] == 'ok'
     assert "script-src 'self'" in response.headers['Content-Security-Policy']
+    assert 'tile.openstreetmap.org' in response.headers['Content-Security-Policy']
+    page = client.get('/')
+    assert 'data-panel="peta"' in page.text and 'Lokasi sintetis' in page.text
+    assert client.get('/static/vendor/leaflet/leaflet.js').status_code == 200
 
 
 @pytest.mark.parametrize('query', ['sensor=-1', 'sensor=24', 'sensor=x', 'horizon=0', 'horizon=13', 'horizon=1.5'])
