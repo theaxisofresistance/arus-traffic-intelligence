@@ -42,6 +42,7 @@ def create_app(test_config=None):
     lock = threading.RLock()
     app.extensions['traffic'] = service
     iot_path = folder / 'iot_readings.json'
+    iot_import_path = folder / 'iot_imports.json'
 
     def load_iot_readings():
         try:
@@ -52,10 +53,26 @@ def create_app(test_config=None):
 
     iot_readings = load_iot_readings()
 
+    def load_iot_imports():
+        try:
+            value = json.loads(iot_import_path.read_text(encoding='utf-8'))
+            return set(value) if isinstance(value, list) else set()
+        except (OSError, ValueError):
+            return set()
+
+    iot_imports = load_iot_imports()
+
     def persist_iot_readings():
         temporary = folder / 'iot_readings.tmp'
         temporary.write_text(json.dumps(iot_readings, ensure_ascii=False), encoding='utf-8')
         os.replace(temporary, iot_path)
+
+    def persist_iot_imports():
+        temporary = folder / 'iot_imports.tmp'
+        active_ids = {reading['id'] for reading in iot_readings}
+        iot_imports.intersection_update(active_ids)
+        temporary.write_text(json.dumps(sorted(iot_imports)), encoding='utf-8')
+        os.replace(temporary, iot_import_path)
 
     @app.before_request
     def protect_changes():
@@ -190,7 +207,44 @@ def create_app(test_config=None):
             latest = {}
             for reading in reversed(iot_readings):
                 latest.setdefault(reading['device_id'], reading)
-        return jsonify(readings=recent, latest=list(latest.values()), total=len(iot_readings))
+            devices = []
+            for device_id in sorted({reading['device_id'] for reading in iot_readings}):
+                device_readings = [reading for reading in iot_readings if reading['device_id'] == device_id]
+                devices.append({'device_id': device_id, 'total': len(device_readings),
+                                'pending': sum(reading['id'] not in iot_imports for reading in device_readings)})
+        return jsonify(readings=recent, latest=list(latest.values()), devices=devices, total=len(iot_readings))
+
+    @app.post('/api/iot/append')
+    def append_iot_to_dataset():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            raise ValueError('Body harus berupa objek JSON.')
+        device_id = str(payload.get('device_id', '')).strip()
+        if not IOT_DEVICE_PATTERN.fullmatch(device_id):
+            raise ValueError('device_id tidak valid.')
+        match = re.fullmatch(r'(?:sensor-|esp8266-)(\d+)', device_id, re.IGNORECASE)
+        if not match:
+            raise ValueError('device_id harus berformat sensor-001 atau esp8266-001.')
+        sensor = int(match.group(1))
+        with lock:
+            pending = [reading for reading in iot_readings
+                       if reading['device_id'] == device_id and reading['id'] not in iot_imports]
+            pending.sort(key=lambda reading: reading['timestamp'])
+            service.append_sensor_readings(sensor, pending)
+            iot_imports.update(reading['id'] for reading in pending)
+            persist_iot_imports()
+        return jsonify(message=f'{len(pending)} data {device_id} ditambahkan ke dataset.',
+                       appended=len(pending), sensor=sensor, steps=len(service.data))
+
+    @app.delete('/api/iot/storage')
+    def clear_iot_storage():
+        with lock:
+            removed = len(iot_readings)
+            iot_readings.clear()
+            iot_imports.clear()
+            iot_path.unlink(missing_ok=True)
+            iot_import_path.unlink(missing_ok=True)
+        return jsonify(message=f'{removed} data IoT berhasil dihapus.', removed=removed)
 
     @app.get('/api/forecast.csv')
     def export_csv():

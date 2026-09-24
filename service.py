@@ -235,6 +235,35 @@ class TrafficService:
         self.model = model
         self.persist()
 
+    def append_sensor_readings(self, sensor, readings):
+        """Append IoT readings as timesteps while carrying other sensors forward."""
+        if not 0 <= sensor < self.data.shape[1]:
+            raise ValueError(f'Indeks sensor {sensor} tidak tersedia pada dataset aktif.')
+        if not readings:
+            raise ValueError('Tidak ada data IoT baru untuk ditambahkan.')
+        if len(self.data) + len(readings) > 200000:
+            raise ValueError('Dataset akan melebihi batas 200.000 timestep.')
+        frames = np.repeat(self.data[-1:, :, :], len(readings), axis=0)
+        for index, reading in enumerate(readings):
+            occupancy = float(reading['occupancy'])
+            if self.occupancy_unit == 'fraction':
+                occupancy /= 100
+            speed = float(reading['speed'])
+            if self.speed_unit == 'mph':
+                speed /= 1.609344
+            frames[index, sensor] = (float(reading['flow']), occupancy, speed)
+        combined = np.concatenate((self.data, frames.astype(np.float32)), axis=0)
+        if combined.nbytes > MAX_EXPANDED_BYTES:
+            raise ValueError('Dataset akan melebihi batas 180 MB.')
+        temporary = self.folder / 'dataset.tmp'
+        with temporary.open('wb') as handle:
+            np.savez_compressed(handle, data=combined)
+        os.replace(temporary, self.folder / 'dataset.npz')
+        self.data = combined
+        self.source = 'uploaded'
+        self.filename = f'{self.filename.split(" + IoT")[0]} + IoT'
+        self.persist()
+
     def reset(self):
         self.data, self.model = seed_data(), None
         self.source, self.filename = 'default', 'Dataset operasional · 24 sensor'

@@ -5,3 +5,4 @@ models/*.pt
 *.pyc
 instance/session.key
 instance/iot_readings.json
+instance/iot_imports.json

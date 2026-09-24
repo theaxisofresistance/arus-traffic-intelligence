@@ -129,6 +129,11 @@ async function loadIot(silent=false){
     const data=await api('/api/iot/readings?limit=50');
     text('iot-total',data.total);text('iot-devices',data.latest.length);
     text('iot-last',data.readings.length?iotDate(data.readings[0].received_at):'Belum ada data');
+    const device=$('iot-device'),selected=device.value;
+    device.replaceChildren(...(data.devices.length?data.devices.map(row=>option(row.device_id,`${row.device_id} · ${row.pending} baru`)):[option('','Belum ada perangkat')]));
+    if(selected&&data.devices.some(row=>row.device_id===selected))device.value=selected;
+    const current=data.devices.find(row=>row.device_id===device.value);
+    $('iot-append').disabled=!current||current.pending===0;
     $('iot-table').innerHTML=data.readings.length?data.readings.map(row=>`<tr><td>${iotDate(row.timestamp)}</td><td><span class="sensor-cell"><span class="sensor-symbol">${icon('sensor')}</span>${row.device_id}</span></td><td>${number(row.flow,2)}</td><td>${number(row.occupancy,2)}</td><td>${number(row.speed,2)}</td><td>${row.latitude===undefined?'—':`${number(row.latitude,6)}, ${number(row.longitude,6)}`}</td><td>${iotDate(row.received_at)}</td></tr>`).join(''):'<tr><td colspan="7" class="empty-row">Belum ada data sensor.</td></tr>';
   }catch(error){if(!silent)fail(error);}
 }
@@ -263,6 +268,28 @@ $('sensor-search').addEventListener('input',()=>{state.listPage=0;renderSensors(
 $('previous-page').addEventListener('click',()=>{state.listPage--;renderSensors();});
 $('next-page').addEventListener('click',()=>{state.listPage++;renderSensors();});
 $('iot-refresh').addEventListener('click',()=>loadIot());
+$('iot-clear').addEventListener('click',()=>$('iot-clear-dialog').showModal());
+$('cancel-iot-clear').addEventListener('click',()=>$('iot-clear-dialog').close());
+$('confirm-iot-clear').addEventListener('click',async()=>{
+  $('iot-clear-dialog').close();
+  const button=$('iot-clear');
+  if(state.pending)return;
+  state.pending++;button.disabled=true;
+  try{const result=await api('/api/iot/storage',{method:'DELETE'});toast(result.message);await loadIot();}
+  catch(error){fail(error);}
+  finally{state.pending--;button.disabled=false;}
+});
+$('iot-device').addEventListener('change',()=>loadIot(true));
+$('iot-append').addEventListener('click',async()=>{
+  if(state.pending)return;
+  const button=$('iot-append'),deviceId=$('iot-device').value;if(!deviceId)return;
+  state.pending++;button.disabled=true;
+  try{
+    const result=await api('/api/iot/append',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:deviceId})});
+    toast(result.message);await Promise.all([load({reset:true}),loadIot()]);
+  }catch(error){fail(error);}
+  finally{state.pending--;await loadIot(true);}
+});
 $('find-route').addEventListener('click',drawRecommendedRoute);
 $('menu-button').addEventListener('click',()=>{const open=!$('sidebar').classList.contains('open');$('sidebar').classList.toggle('open',open);$('scrim').hidden=!open;$('menu-button').setAttribute('aria-expanded',String(open));});
 $('scrim').addEventListener('click',closeMenu);

@@ -118,6 +118,8 @@ arus_flask/
 | `GET /api/reference.npz` | Unduh dataset referensi |
 | `GET /api/iot/readings?limit=50` | Daftar data IoT terbaru (limit 1–200) |
 | `POST /api/iot/readings` | Terima pembacaan JSON dari perangkat IoT |
+| `POST /api/iot/append` | Tambahkan data baru dari satu device ID ke dataset aktif |
+| `DELETE /api/iot/storage` | Hapus pembacaan dan riwayat impor IoT |
 | `POST /api/data` | Multipart: `file`, `interval`, `speed_unit`, `occupancy_unit` |
 | `POST /api/model` | Multipart: `file` (`.pt`) |
 | `DELETE /api/model` | Lepas model; gunakan baseline dengan dataset yang sama |
@@ -136,6 +138,8 @@ curl -X POST http://127.0.0.1:5001/api/iot/readings \
 ```
 
 Endpoint ini tidak memerlukan API key atau cookie sesi. Maksimum 500 pembacaan terakhir disimpan di `instance/iot_readings.json`; data IoT ini belum otomatis digabungkan ke dataset forecasting. Karena endpoint menerima POST tanpa autentikasi, jangan mengekspos aplikasi langsung ke internet tanpa perlindungan jaringan yang sesuai.
+
+Pada halaman IoT Live, pilih device lalu tekan **Tambahkan ke dataset**. Sufiks angka pada `sensor-001` atau `esp8266-001` dipetakan ke indeks sensor `1`. Setiap pembacaan yang belum pernah diimpor menjadi timestep baru; nilai sensor lain membawa pengamatan terakhir agar bentuk `[waktu, sensor, 3]` tetap konsisten. Occupancy dikonversi dari persen jika dataset aktif memakai fraksi, dan speed dikonversi ke mph jika diperlukan. Data yang sama tidak diimpor dua kali.
 
 Sketch ESP8266 + NEO-6M tersedia di `notebooks/iot.ino`. Pasang library **TinyGPSPlus**, pilih board ESP8266 yang sesuai, ubah kredensial Wi-Fi, pin GPS bila perlu, serta `SERVER_URL` ke IP LAN komputer. Jalankan Flask agar dapat diakses dari jaringan lokal:
 

@@ -103,6 +103,38 @@ def test_iot_ingest_validation_and_persistence(app):
     assert restored.test_client().get('/api/iot/readings').json['total'] == 1
 
 
+def test_append_iot_readings_to_dataset(app):
+    client, headers = client_with_token(app)
+    first = {'device_id': 'sensor-001', 'flow': 101, 'occupancy': 42, 'speed': 48}
+    second = {'device_id': 'sensor-001', 'flow': 102, 'occupancy': 43, 'speed': 49}
+    assert client.post('/api/iot/readings', json=first).status_code == 201
+    assert client.post('/api/iot/readings', json=second).status_code == 201
+    status = client.get('/api/iot/readings').json
+    assert status['devices'][0] == {'device_id': 'sensor-001', 'total': 2, 'pending': 2}
+    response = client.post('/api/iot/append', headers=headers, json={'device_id': 'sensor-001'})
+    assert response.status_code == 200 and response.json['appended'] == 2
+    dashboard = client.get('/api/dashboard?sensor=1&horizon=1').json
+    assert dashboard['steps'] == 1154 and dashboard['source'] == 'uploaded'
+    assert dashboard['sensors'][1]['flow'] == 102
+    assert np.isclose(dashboard['sensors'][1]['occupancy'], .43)
+    assert client.get('/api/iot/readings').json['devices'][0]['pending'] == 0
+    assert client.post('/api/iot/append', headers=headers, json={'device_id': 'sensor-001'}).status_code == 400
+    assert client.post('/api/iot/append', headers=headers, json={'device_id': 'sensor-999'}).status_code == 400
+
+
+def test_clear_iot_storage(app):
+    client, headers = client_with_token(app)
+    payload = {'device_id': 'sensor-001', 'flow': 100, 'occupancy': 40, 'speed': 50}
+    assert client.post('/api/iot/readings', json=payload).status_code == 201
+    assert client.post('/api/iot/append', headers=headers, json={'device_id': 'sensor-001'}).status_code == 200
+    assert client.delete('/api/iot/storage').status_code == 403
+    response = client.delete('/api/iot/storage', headers=headers)
+    assert response.status_code == 200 and response.json['removed'] == 1
+    assert client.get('/api/iot/readings').json['total'] == 0
+    assert not (Path(app.config['DATA_DIR']) / 'iot_readings.json').exists()
+    assert not (Path(app.config['DATA_DIR']) / 'iot_imports.json').exists()
+
+
 def test_upload_missing_values_restart_and_reset(app):
     client, headers = client_with_token(app)
     data = np.ones((70, 4, 3), np.float32) * 10
