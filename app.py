@@ -48,8 +48,11 @@ def create_app(test_config=None):
     service = TrafficService(folder)
     lock = threading.RLock()
     app.extensions['traffic'] = service
-    iot_path = folder / 'iot_readings.json'
-    iot_import_path = folder / 'iot_imports.json'
+    # Dataset/model memakai DATA_DIR (di Vercel: /tmp), sedangkan arsip IoT
+    # tetap dibaca dari direktori instance aplikasi.
+    iot_folder = Path(app.instance_path) if os.environ.get('VERCEL') else folder
+    iot_path = iot_folder / 'iot_readings.json'
+    iot_import_path = iot_folder / 'iot_imports.json'
 
     def load_iot_readings():
         try:
@@ -70,12 +73,12 @@ def create_app(test_config=None):
     iot_imports = load_iot_imports()
 
     def persist_iot_readings():
-        temporary = folder / 'iot_readings.tmp'
+        temporary = iot_folder / 'iot_readings.tmp'
         temporary.write_text(json.dumps(iot_readings, ensure_ascii=False), encoding='utf-8')
         os.replace(temporary, iot_path)
 
     def persist_iot_imports():
-        temporary = folder / 'iot_imports.tmp'
+        temporary = iot_folder / 'iot_imports.tmp'
         active_ids = {reading['id'] for reading in iot_readings}
         iot_imports.intersection_update(active_ids)
         temporary.write_text(json.dumps(sorted(iot_imports)), encoding='utf-8')
