@@ -6,6 +6,7 @@ import math
 import os
 import re
 import secrets
+import shutil
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -30,6 +31,12 @@ def create_app(test_config=None):
         app.config.update(test_config)
     folder = Path(app.config['DATA_DIR'])
     folder.mkdir(parents=True, exist_ok=True)
+    if os.environ.get('VERCEL') and folder.resolve() != Path(app.instance_path).resolve():
+        packaged_instance = Path(app.instance_path)
+        for filename in ('active.json', 'dataset.npz', 'model.pt'):
+            source, destination = packaged_instance / filename, folder / filename
+            if source.is_file() and not destination.exists():
+                shutil.copy2(source, destination)
     secret_path = folder / 'session.key'
     if not secret_path.exists():
         secret_path.write_text(secrets.token_hex(32))

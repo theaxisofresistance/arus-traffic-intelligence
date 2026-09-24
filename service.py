@@ -186,13 +186,18 @@ class TrafficService:
             try:
                 meta = json.loads(meta_path.read_text())
                 data = read_npz(self.folder / 'dataset.npz') if meta['source'] == 'uploaded' else seed_data()
-                model = load_model(self.folder / 'model.pt') if meta.get('model') else None
-                if model:
-                    self.validate_pair(data, model, meta['interval'])
-                self.data, self.model = data, model
+                self.data = data
                 self.source = 'uploaded' if meta['source'] == 'uploaded' else 'default'
                 self.filename = meta['filename'] if self.source == 'uploaded' else 'Dataset operasional · 24 sensor'
                 self.interval, self.speed_unit, self.occupancy_unit = meta['interval'], meta['speed_unit'], meta['occupancy_unit']
+                if meta.get('model'):
+                    try:
+                        model = load_model(self.folder / 'model.pt')
+                        self.validate_pair(data, model, meta['interval'])
+                        self.model = model
+                    except Exception:
+                        self.model = None
+                        self.startup_notice = 'Model tersimpan tidak dapat dimuat. Dataset aktif menggunakan baseline.'
             except Exception:
                 self.startup_notice = 'Konfigurasi tersimpan tidak dapat dimuat. Konfigurasi default diaktifkan; unggah ulang pasangan data dan model.'
 

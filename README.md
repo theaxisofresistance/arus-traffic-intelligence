@@ -141,7 +141,7 @@ Endpoint ini tidak memerlukan API key atau cookie sesi. Maksimum 500 pembacaan t
 
 Pada halaman IoT Live, pilih device lalu tekan **Tambahkan ke dataset**. Sufiks angka pada `sensor-001` atau `esp8266-001` dipetakan ke indeks sensor `1`. Setiap pembacaan yang belum pernah diimpor menjadi timestep baru; nilai sensor lain membawa pengamatan terakhir agar bentuk `[waktu, sensor, 3]` tetap konsisten. Occupancy dikonversi dari persen jika dataset aktif memakai fraksi, dan speed dikonversi ke mph jika diperlukan. Data yang sama tidak diimpor dua kali.
 
-Sketch ESP8266 + NEO-6M tersedia di `notebooks/iot.ino`. Pasang library **TinyGPSPlus**, pilih board ESP8266 yang sesuai, ubah kredensial Wi-Fi, pin GPS bila perlu, serta `SERVER_URL` ke IP LAN komputer. Jalankan Flask agar dapat diakses dari jaringan lokal:
+Sketch ESP8266 + NEO-6M tersedia di `notebooks/iot.ino`. Pasang library **TinyGPSPlus**, pilih board ESP8266 yang sesuai, isi array `WIFI_NETWORKS`, sesuaikan pin GPS bila perlu, serta atur `SERVER_URL`. ESP8266 mencoba setiap jaringan secara berurutan sampai berhasil tersambung. Jalankan Flask agar dapat diakses dari jaringan lokal:
 
 ```bash
 HOST=0.0.0.0 python app.py
@@ -154,6 +154,8 @@ ESP8266 langsung mengirim satu data setelah tersambung, lalu mengirim setiap 5 m
 Aplikasi ditujukan untuk **satu workspace lokal**; semua pengguna proses server yang sama memakai data/model yang sama. Endpoint perubahan diserialisasikan dengan lock. Jangan menjalankan beberapa worker proses terhadap folder data yang sama. `instance/` menyimpan dataset dan model aktif; `ARUS_DATA_DIR` dapat mengubah lokasi. `ARUS_SECRET_KEY` dapat mengatur kunci sesi.
 
 Tidak ada autentikasi pengguna. Server default hanya mendengarkan `127.0.0.1` dan debug dimatikan. Untuk layanan publik/multiuser, tambahkan autentikasi, penyimpanan per pengguna, pembatasan sumber daya, HTTPS, dan job queue sebelum membuka akses.
+
+Pada Vercel, `instance/active.json`, `instance/dataset.npz`, dan `instance/model.pt` dari deployment disalin ke `/tmp/arus_flask` ketika instance serverless dimulai. Dataset bawaan dapat dibaca sebagai kondisi awal; jika PyTorch tidak tersedia, aplikasi tetap memuat dataset dan menggunakan baseline. Atur `ARUS_SECRET_KEY` yang sama pada environment Vercel agar sesi konsisten. Perubahan terhadap `/tmp` tetap bersifat sementara, sehingga data IoT dan perubahan dataset setelah deployment memerlukan database/object storage untuk persistensi permanen.
 
 ## Pengujian
 

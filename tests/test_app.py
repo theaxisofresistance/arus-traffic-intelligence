@@ -1,4 +1,5 @@
 import io
+import json
 import re
 import sys
 import zipfile
@@ -166,6 +167,22 @@ def test_corrupt_file_and_request_size(app):
     app.config['MAX_CONTENT_LENGTH'] = 512
     response=client.post('/api/data', headers=headers, data={'file': (io.BytesIO(b'x'*1024), 'big.npz')})
     assert response.status_code == 413
+
+
+def test_saved_dataset_survives_unavailable_model(app):
+    client, headers = client_with_token(app)
+    data = np.ones((40, 3, 3), np.float32) * 7
+    assert upload(client, headers, data).status_code == 200
+    folder = Path(app.config['DATA_DIR'])
+    meta = json.loads((folder / 'active.json').read_text())
+    meta['model'] = True
+    (folder / 'active.json').write_text(json.dumps(meta))
+    (folder / 'model.pt').write_bytes(b'not a valid checkpoint')
+    restored = create_app({'TESTING': True, 'DATA_DIR': str(folder)})
+    dashboard = restored.test_client().get('/api/dashboard').json
+    assert dashboard['source'] == 'uploaded' and dashboard['nodes'] == 3
+    assert not dashboard['has_model']
+    assert 'baseline' in dashboard['notice'].lower()
 
 
 def test_npy_header_rejects_huge_shape_before_allocation(tmp_path):

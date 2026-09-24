@@ -10,7 +10,7 @@
  *   NEO-6M TX  -> D5 / GPIO 14 (GPS_RX_PIN)
  *   NEO-6M RX  -> D6 / GPIO 12 (GPS_TX_PIN, opsional)
  *
- * Ganti WIFI_SSID, WIFI_PASSWORD, dan SERVER_URL sebelum upload.
+ * Isi daftar WIFI_NETWORKS dan SERVER_URL sebelum upload.
  * SERVER_URL harus memakai IP LAN komputer Flask, bukan 127.0.0.1.
  */
 
@@ -20,10 +20,20 @@
 #include <SoftwareSerial.h>
 #include <TinyGPSPlus.h>
 
-const char *WIFI_SSID = "Azhar-wifi";
-const char *WIFI_PASSWORD = "azharrudin";
+struct WifiCredential {
+  const char *ssid;
+  const char *password;
+};
+
+const WifiCredential WIFI_NETWORKS[] = {
+  {"Azhar Rudin's iPhone", "12345678"}
+};
+
+constexpr size_t WIFI_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
+constexpr uint32_t WIFI_TIMEOUT_MS = 12000UL;
+constexpr uint32_t WIFI_LED_BLINK_MS = 400UL;
 const char *SERVER_URL = "https://arus-traffic-intelligence-zeta.vercel.app/api/iot/readings";
-const char *DEVICE_ID = "esp8266-001";
+const char *DEVICE_ID = "sensor-001";
 
 constexpr int GPS_RX_PIN = 14;  // D5 pada NodeMCU
 constexpr int GPS_TX_PIN = 12;  // D6 pada NodeMCU; opsional
@@ -37,23 +47,31 @@ constexpr double FALLBACK_LONGITUDE = 106.796941;
 // PEMS08 direkam per 5 menit.
 constexpr uint32_t SEND_INTERVAL_MS = 5UL * 60UL * 1000UL;
 
-#if !defined(LED_BUILTIN)
-constexpr int LED_BUILTIN = 2;
-#endif
+// LED biru onboard NodeMCU V3: D4 / GPIO2, aktif-low.
+constexpr int STATUS_LED_PIN = 2;
 
 TinyGPSPlus gps;
 SoftwareSerial gpsSerial(GPS_RX_PIN, GPS_TX_PIN);
 uint32_t lastSendMs = 0;
+uint32_t lastLedBlinkMs = 0;
 bool firstReadingPending = true;
+bool ledBlinkState = true;
 
 void setupStatusLed() {
-  pinMode(LED_BUILTIN, OUTPUT);
-  // LED onboard ESP8266 umumnya aktif-low.
-  digitalWrite(LED_BUILTIN, LOW);
+  pinMode(STATUS_LED_PIN, OUTPUT);
+  digitalWrite(STATUS_LED_PIN, LOW);
 }
 
 void setStatusLed(bool on) {
-  digitalWrite(LED_BUILTIN, on ? LOW : HIGH);
+  digitalWrite(STATUS_LED_PIN, on ? LOW : HIGH);
+}
+
+void updateDisconnectedLed() {
+  const uint32_t now = millis();
+  if (now - lastLedBlinkMs < WIFI_LED_BLINK_MS) return;
+  lastLedBlinkMs = now;
+  ledBlinkState = !ledBlinkState;
+  setStatusLed(ledBlinkState);
 }
 
 void readGps() {
@@ -65,24 +83,37 @@ void readGps() {
 void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
 
-  Serial.printf("Menghubungkan ke Wi-Fi %s", WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.persistent(false);
 
-  const uint32_t startedAt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startedAt < 20000UL) {
-    readGps();
+  for (size_t index = 0; index < WIFI_COUNT; ++index) {
+    const WifiCredential &network = WIFI_NETWORKS[index];
+    if (network.ssid[0] == '\0') continue;
+
+    WiFi.disconnect();
     delay(100);
-    Serial.print('.');
-  }
-  Serial.println();
+    Serial.printf("Mencoba Wi-Fi %u/%u: %s", index + 1, WIFI_COUNT, network.ssid);
+    WiFi.begin(network.ssid, network.password);
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("Wi-Fi tersambung. IP ESP8266: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("Wi-Fi belum tersambung; akan dicoba lagi.");
+    const uint32_t startedAt = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startedAt < WIFI_TIMEOUT_MS) {
+      readGps();
+      updateDisconnectedLed();
+      delay(100);
+      Serial.print('.');
+    }
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.printf("Wi-Fi tersambung ke %s. IP ESP8266: ", network.ssid);
+      Serial.println(WiFi.localIP());
+      return;
+    }
+
+    Serial.printf("Gagal tersambung ke %s. Mencoba jaringan berikutnya.\n", network.ssid);
   }
+
+  Serial.println("Semua Wi-Fi gagal; daftar akan dicoba lagi pada siklus berikutnya.");
 }
 
 float randomFloat(float minimum, float maximum) {
@@ -107,9 +138,10 @@ bool sendReading() {
 
   connectWifi();
   if (WiFi.status() != WL_CONNECTED) {
-    setStatusLed(true);
+    updateDisconnectedLed();
     return false;
   }
+  setStatusLed(false);
 
   // Nilai trafik otomatis. Kecepatan dibuat berbanding terbalik dengan occupancy.
   const float occupancy = randomFloat(5.0f, 75.0f);       // persen
@@ -179,6 +211,7 @@ void setup() {
 
   Serial.println("ARUS IoT sender dimulai.");
   connectWifi();
+  if (WiFi.status() == WL_CONNECTED) setStatusLed(true);
 }
 
 void loop() {
@@ -190,6 +223,10 @@ void loop() {
     sendReading();
     lastSendMs = millis();
     firstReadingPending = false;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    updateDisconnectedLed();
   }
 
   delay(10);
