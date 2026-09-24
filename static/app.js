@@ -230,7 +230,10 @@ function renderMap(){
   if(!window.L){holder.textContent='Library peta tidak dapat dimuat.';return;}
   if(!state.map){
     state.map=L.map(holder,{zoomControl:true,minZoom:8,maxZoom:16}).setView(state.data.map_metadata.center,10);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(state.map);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      maxZoom:19,
+      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(state.map);
     state.mapLayer=L.layerGroup().addTo(state.map);
   }
   state.map.invalidateSize();

@@ -63,11 +63,15 @@ def test_default_forecast_and_csv(app):
     assert len(csv.text.strip().splitlines()) == 7
     assert client.get('/api/health').json['status'] == 'ok'
     assert "script-src 'self'" in response.headers['Content-Security-Policy']
-    assert 'tile.openstreetmap.org' in response.headers['Content-Security-Policy']
+    assert 'https://tile.openstreetmap.org' in response.headers['Content-Security-Policy']
     page = client.get('/')
     assert 'data-panel="peta"' in page.text and 'Live workspace' in page.text
     assert 'id="prediction-road"' in page.text and 'Koridor operasional' in page.text
     assert client.get('/static/vendor/leaflet/leaflet.js').status_code == 200
+
+    javascript = client.get('/static/app.js').text
+    assert 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' in javascript
+    assert 'https://{s}.tile.openstreetmap.org' not in javascript
 
 
 @pytest.mark.parametrize('query', ['sensor=-1', 'sensor=24', 'sensor=x', 'horizon=0', 'horizon=13', 'horizon=1.5'])
