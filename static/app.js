@@ -20,6 +20,7 @@ function closeMenu(){$('sidebar').classList.remove('open');$('scrim').hidden=tru
 function setPage(page){
   if(!titles[page]) page='ringkasan';state.page=page;
   document.querySelectorAll('[data-panel]').forEach(el=>el.hidden=el.dataset.panel!==page);
+  $('context-strip').hidden=page!=='sensor';
   document.querySelectorAll('.nav-item').forEach(el=>{el.classList.toggle('active',el.dataset.page===page);el.setAttribute('aria-current',el.dataset.page===page?'page':'false');});
   text('page-title',titles[page][0]);text('page-subtitle',titles[page][1]);text('breadcrumb-title',titles[page][2]);
   history.replaceState(null,'',`#${page}`);closeMenu();
